@@ -204,7 +204,10 @@ It 'never derives the new value from the session PATH' {
     $sessionBefore = $env:PATH
     $plan = Get-AlphacodePathPlan -UserPath 'C:\only-user-entry' -BinDir 'C:\c'
     Assert-Equal $sessionBefore $env:PATH -Because 'planning must not touch the session PATH'
-    Assert-True ($plan.Value -notlike "*$([IO.Path]::PathSeparator)*$([IO.Path]::PathSeparator)*") `
+    # The planner splits on ';' because it handles Windows user PATH values;
+    # checking with [IO.Path]::PathSeparator would use ':' on non-Windows CI
+    # runners, where 'C:\c' itself looks like two separators.
+    Assert-True ($plan.Value -notlike '*;;*') `
         -Because 'the result must be a single PATH, not a doubled-up merge'
 }
 
@@ -220,8 +223,12 @@ It 'detects Windows without relying on $IsWindows' {
     # variable is undefined and evaluates to $null -- so a test against it is
     # always false there and the Windows branch is dead code on the shell most
     # users actually run.
-    Assert-True -Condition (Test-AlphacodeWindows) -Because 'this suite is running on Windows'
-    Assert-True -Condition ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) `
+    $onWindows = ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+    # The suite itself runs cross-platform (the CI job above is ubuntu-latest),
+    # so the helper must agree with the runtime wherever it runs -- true on
+    # Windows, false elsewhere. Asserting an unconditional true would make
+    # this test fail on every non-Windows runner even though the code is right.
+    Assert-True -Condition ((Test-AlphacodeWindows) -eq $onWindows) `
         -Because 'the helper must agree with the runtime, not with a PS6-only variable'
 }
 

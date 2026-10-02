@@ -1244,8 +1244,16 @@ impl Default for WebSearchConfig {
 #[serde(default)]
 pub struct ProviderConfig {
     /// Default model to use (e.g. "claude-opus-4-8", "copilot:claude-opus-4.6")
+    ///
+    /// Omitted from the file while it is still the shipped fallback — see
+    /// [`is_unset_or_shipped_default_model`].
+    #[serde(skip_serializing_if = "is_unset_or_shipped_default_model")]
     pub default_model: Option<String>,
     /// Default provider to use (claude|openai|copilot|openrouter)
+    ///
+    /// Omitted from the file while it is still the shipped fallback — see
+    /// [`is_unset_or_shipped_default_provider`].
+    #[serde(skip_serializing_if = "is_unset_or_shipped_default_provider")]
     pub default_provider: Option<String>,
     /// Reasoning effort for OpenAI Responses API (none|minimal|low|medium|high|xhigh|max)
     pub openai_reasoning_effort: Option<String>,
@@ -1300,6 +1308,45 @@ impl Default for ProviderConfig {
             model_picker_providers: None,
             stream_idle_timeout_secs: 180,
         }
+    }
+}
+
+/// Whether `value` says nothing, or merely repeats the shipped default.
+///
+/// `ProviderConfig::default` *ships* a `default_model` and `default_provider`,
+/// and `#[serde(default)]` puts them back for every key the file omits. So a
+/// config where the user never chose anything parses to exactly the same values
+/// as one where they deliberately chose `kilo-auto/free` — and once any `save()`
+/// writes them out, the file can no longer tell the two apart. That matters:
+/// `Config::has_explicit_provider_defaults` reads the raw document precisely so
+/// that "absent" stays distinct from "set", and onboarding uses it to decide
+/// whether a first-run user has pinned a model.
+///
+/// Observed effect: the first-run import marks the imported login as a trusted
+/// external source and saves the config, which wrote the shipped fallback out in
+/// full. From then on the file looked like a deliberate choice, and the
+/// strongest-model pick never happened for any user who imported a login on a
+/// fresh install.
+///
+/// A value the user *did* pick, including one that happens to equal the shipped
+/// default, is still written — the comparison below is against the current
+/// default, so changing the shipped default re-anchors it rather than pinning it.
+fn is_unset_or_shipped_default_model(value: &Option<String>) -> bool {
+    matches_shipped_default(value, &ProviderConfig::default().default_model)
+}
+
+fn is_unset_or_shipped_default_provider(value: &Option<String>) -> bool {
+    matches_shipped_default(value, &ProviderConfig::default().default_provider)
+}
+
+fn matches_shipped_default(value: &Option<String>, shipped: &Option<String>) -> bool {
+    let Some(shipped) = shipped.as_deref().map(str::trim) else {
+        // No shipped default for this field: only "absent" is implicit.
+        return value.as_deref().map(str::trim).unwrap_or("").is_empty();
+    };
+    match value.as_deref().map(str::trim) {
+        None | Some("") => true,
+        Some(value) => value == shipped,
     }
 }
 

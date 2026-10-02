@@ -337,6 +337,9 @@ fn browser_tool_description_text() -> &'static str {
      returns no page body; follow with 'snapshot'. \
      Cookies: 'get_cookies' sees HttpOnly, 'set_cookies'/'delete_cookie' write, 'list_cookies' \
      is legacy eval only. \
+     Locating elements: 'interactables' (alias 'find') prints index=N per element; pass that \
+     index back with click/hover/type rather than guessing a selector, and add include_hidden \
+     for collapsed or display:none targets. \
      Eval: end scripts with `return <expr>`; top-level await works; read responses with \
      `await (await fetch(u)).text()`. \
      Also: 'close_tab', 'go_back', 'go_forward', 'reload', 'hover', 'drag_and_drop'."
@@ -381,6 +384,23 @@ struct BrowserInput {
     y: Option<f64>,
     #[serde(default)]
     target_selector: Option<String>,
+    /// Nth match of the selector, 0-based.
+    ///
+    /// `interactables` numbers its results and the extension's `resolveElement`
+    /// honours an `index`, but this tool had no way to pass one. An agent
+    /// holding "3. [button] Sign in" had no faithful way to express the target,
+    /// so it guessed a selector instead — which is how a correct answer turned
+    /// into "Element not found".
+    #[serde(default)]
+    index: Option<i64>,
+    /// Include elements that are present but not visible.
+    ///
+    /// The extension filters candidates through `visible()` unless told
+    /// otherwise, so an element inside a collapsed section, a `display:none`
+    /// widget, or an off-screen menu item resolved to nothing at all. Reaching
+    /// those is sometimes exactly what is needed.
+    #[serde(default, alias = "includeHidden")]
+    include_hidden: Option<bool>,
     #[serde(default)]
     format: Option<String>,
     #[serde(default)]
@@ -692,6 +712,14 @@ impl Tool for BrowserTool {
                 "target_selector",
                 json!({"type": "string", "description": "For drag_and_drop: CSS selector of the drop target. 'selector' is the drag source."}),
             ),
+            (
+                "index",
+                json!({"type": "integer", "description": "0-based index of the selector match to act on. 'interactables' numbers its results, so index=2 targets the 3rd entry — use this instead of guessing a selector."}),
+            ),
+            (
+                "include_hidden",
+                json!({"type": "boolean", "description": "Act on elements that exist but are not visible (collapsed menus, display:none widgets, off-screen items). Default false."}),
+            ),
             ("wait", json!({"type": "boolean"})),
             (
                 "new_tab",
@@ -896,6 +924,13 @@ fn normalize_action(action: &str) -> &str {
         "tab_list" => "list_tabs",
         "new_browser_tab" => "new_tab",
         "close_browser_tab" => "close_tab",
+        // Locating an element is what `interactables` does. A model that asks
+        // for `find` / `search` / `locate` wants the element list, not a
+        // rejection: the previous behaviour refused the call outright, the
+        // agent retried with a different invented name, and the click it was
+        // trying to make never happened.
+        "find" | "search" | "locate" | "find_element" | "query" | "elements" | "list_elements"
+        | "list_interactables" => "interactables",
         other => other,
     }
 }
@@ -1320,7 +1355,13 @@ fn enrich_browser_error(action: &str, err: anyhow::Error) -> anyhow::Error {
         && lower.contains("element not found")
     {
         return anyhow::anyhow!(
-            "{msg}\n\nHint: nothing on the page matched the given selector/text/coordinates. Run action='snapshot' or action='interactables' first and use an exact selector from it; if the page was still loading, action='wait' for the text/selector before retrying. Elements inside iframes need action='list_frames' + the right frame targeting."
+            "{msg}\n\nHint: nothing on the page matched the given selector/text/coordinates. \
+             Run action='interactables' (or 'snapshot') first — 'interactables' prints an 'index=N' \
+             for every interactive element, and passing that index back with the selector (or \
+             'contains' for text) is more reliable than a hand-written selector. If the element is \
+             present but hidden (collapsed menu, display:none), add include_hidden=true. If the page \
+             was still loading, action='wait' for the text before retrying. Elements inside iframes \
+             need action='list_frames' plus frame targeting."
         );
     }
     if action == "drag_and_drop" && lower.contains("unknown action") {
@@ -1477,6 +1518,12 @@ fn unsupported_action_message(action: &str) -> String {
         ("close", "close_tab"),
         ("text", "get_content"),
         ("content", "get_content"),
+        ("find", "interactables"),
+        ("search", "interactables"),
+        ("locate", "interactables"),
+        ("query", "interactables"),
+        ("elements", "interactables"),
+        ("list_interactables", "interactables"),
         ("set_files", "upload"),
         ("set_input_files", "upload"),
         ("upload_file", "upload"),
@@ -1506,9 +1553,9 @@ fn unsupported_action_message(action: &str) -> String {
     message.push_str(
         " Valid actions: status, setup, list_tabs, new_tab, select_tab, get_active_tab, \
          list_frames, open (alias: navigate), reload, go_back, go_forward, close_tab, snapshot, \
-         get_content, interactables, click, hover, type, fill_form, select, drag_and_drop, wait, \
-         screenshot, eval, scroll, upload (aliases: set_files, set_input_files), press, \
-         get_cookies, set_cookies, delete_cookie, list_cookies, provider_command.",
+         get_content, interactables (alias: find), click, hover, type, fill_form, select, \
+         drag_and_drop, wait, screenshot, eval, scroll, upload (aliases: set_files, set_input_files), \
+         press, get_cookies, set_cookies, delete_cookie, list_cookies, provider_command.",
     );
     message
 }
@@ -1610,7 +1657,18 @@ fn bridge_request(action: &str, input: &BrowserInput) -> Result<(String, Value, 
                 params.insert("maxChars".into(), json!(60_000));
             }
         }
-        "interactables" => {}
+        "interactables" => {
+            // The bridge filters on `text`, and `contains` is documented as the
+            // alias for text-matching. Without this, `contains` was silently
+            // dropped and `interactables` returned all 250 elements instead of
+            // the handful matching the query — which is exactly what an agent
+            // uses this action for, so it then had to pick a selector blind.
+            if input.text.is_none()
+                && let Some(contains) = &input.contains
+            {
+                params.insert("text".into(), json!(contains));
+            }
+        }
         "click" => {
             if input.selector.is_none()
                 && input.text.is_none()
@@ -2097,6 +2155,16 @@ fn apply_common_targeting(params: &mut Map<String, Value>, input: &BrowserInput)
     }
     if let Some(y) = input.y {
         params.insert("y".into(), json!(y));
+    }
+    // The extension's `resolveElement` reads `index` to pick the nth match and
+    // `includeHidden` to stop filtering candidates through `visible()`. Both
+    // were accepted by the schema's spirit but had no parameter to carry them,
+    // so an element that `interactables` had just listed could not be acted on.
+    if let Some(index) = input.index {
+        params.insert("index".into(), json!(index));
+    }
+    if let Some(include_hidden) = input.include_hidden {
+        params.insert("includeHidden".into(), json!(include_hidden));
     }
 }
 
@@ -2747,9 +2815,16 @@ fn format_interactables_result(result: &Value) -> String {
             .get("selector")
             .and_then(|v| v.as_str())
             .unwrap_or("-");
+        // Show the bridge's own 0-based index, not a 1-based ordinal. The
+        // previous rendering printed "1., 2., 3." while the only way to address
+        // a specific element was `index`, which the tool could not even accept —
+        // so the agent read a number that meant nothing and guessed a selector.
+        let index = element
+            .get("index")
+            .and_then(Value::as_i64)
+            .unwrap_or(idx as i64);
         lines.push(format!(
-            "{}. [{}] <{}> {} | selector: {}",
-            idx + 1,
+            "index={index} [{}] <{}> {} | selector: {}",
             kind,
             tag.to_lowercase(),
             text,
@@ -3475,6 +3550,116 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("snapshot"));
         assert!(message.contains("interactables"));
+        // The hint must name the affordances that actually exist, or it sends
+        // the agent looking for something the tool cannot do.
+        assert!(message.contains("index"), "index not suggested: {message}");
+        assert!(
+            message.contains("include_hidden"),
+            "include_hidden not suggested: {message}"
+        );
+    }
+
+    /// `find` was rejected outright, so an agent trying to locate an element had
+    /// to invent a different action name before it could even start.
+    #[test]
+    fn find_style_aliases_resolve_to_interactables() {
+        for alias in [
+            "find",
+            "search",
+            "locate",
+            "find_element",
+            "query",
+            "elements",
+            "list_interactables",
+        ] {
+            assert_eq!(
+                normalize_action(alias),
+                "interactables",
+                "alias {alias} was not recognized"
+            );
+            // And it must survive the KNOWN_ACTIONS gate `execute` applies, or
+            // the alias normalizes to a valid action and is then rejected.
+            let canonical = normalize_action(alias);
+            assert!(
+                KNOWN_ACTIONS.contains(&canonical),
+                "{alias} normalized to `{canonical}`, which is not a dispatchable action"
+            );
+            // `bridge_request` is reached with the already-normalized action,
+            // exactly as `execute` calls it.
+            let input = browser_input(json!({ "action": alias }));
+            let (action, params, _) = bridge_request(canonical, &input).expect("should dispatch");
+            assert_eq!(
+                action, "getInteractables",
+                "alias {alias} dispatched wrongly"
+            );
+            assert!(params.get("selector").is_none());
+        }
+    }
+
+    #[test]
+    fn unsupported_action_message_suggests_interactables_for_find() {
+        let message = unsupported_action_message("find");
+        assert!(message.contains("'interactables'"), "{message}");
+    }
+
+    /// `interactables` numbered its results 1., 2., 3. while the only way to
+    /// address a specific element was an `index` the tool could not accept, so
+    /// the agent read a number that meant nothing and guessed a selector.
+    #[test]
+    fn interactables_output_prints_the_index_it_accepts_back() {
+        let result = json!({
+            "elements": [
+                { "index": 0, "type": "button", "tag": "BUTTON", "text": "Cancel", "selector": "#cancel" },
+                { "index": 1, "type": "button", "tag": "BUTTON", "text": "Sign in", "selector": "#login" },
+            ]
+        });
+        let rendered = format_interactables_result(&result);
+        assert!(rendered.contains("index=0"), "{rendered}");
+        assert!(rendered.contains("index=1"), "{rendered}");
+        assert!(rendered.contains("Sign in"), "{rendered}");
+        // The 1-based ordinal is gone; it could not be used.
+        assert!(!rendered.contains("1. ["), "{rendered}");
+    }
+
+    /// The index the tool prints must be the one it forwards, or the round trip
+    /// the output invites does not work.
+    #[test]
+    fn index_and_include_hidden_reach_the_bridge() {
+        let input = browser_input(json!({
+            "action": "click",
+            "selector": "button",
+            "index": 2,
+            "include_hidden": true,
+        }));
+        let (_, params, _) = bridge_request("click", &input).expect("bridge request");
+        assert_eq!(params["index"], json!(2));
+        assert_eq!(params["includeHidden"], json!(true));
+
+        // And absent unless asked for, so default behaviour is unchanged.
+        let plain = browser_input(json!({"action": "click", "selector": "button"}));
+        let (_, params, _) = bridge_request("click", &plain).expect("bridge request");
+        assert!(params.get("index").is_none());
+        assert!(params.get("includeHidden").is_none());
+    }
+
+    /// `contains` is documented as the text-matching alias, but `interactables`
+    /// dropped it — so the one action whose purpose is locating an element
+    /// ignored its own filter and returned everything.
+    #[test]
+    fn interactables_honors_contains_as_a_filter() {
+        let input = browser_input(json!({"action": "interactables", "contains": "Sign in"}));
+        let (_, params, _) = bridge_request("interactables", &input).expect("bridge request");
+        assert_eq!(params["text"], json!("Sign in"));
+    }
+
+    #[test]
+    fn click_requires_a_target() {
+        let input = browser_input(json!({"action": "click"}));
+        let error = bridge_request("click", &input).expect_err("click needs a target");
+        assert!(
+            error.to_string().contains("requires one of"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

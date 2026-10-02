@@ -757,7 +757,18 @@ pub(crate) fn save_openai_fast_setting_local(app: &mut App, enabled: bool) {
     let value = if enabled { "priority" } else { "off" };
     match crate::config::Config::set_openai_service_tier(Some(value)) {
         Ok(()) => {
-            let _ = app.provider.set_service_tier(value);
+            // A provider that does not support tier switching (anything but the
+            // OpenAI runtime) rejects this. The preference *is* persisted, so
+            // reporting success is defensible, but the running session will
+            // ignore it until reload -- swallowing the error outright hid that
+            // from both the user and the log.
+            if let Err(err) = app.provider.set_service_tier(value) {
+                crate::logging::warn(&format!(
+                    "Saved OpenAI service tier to config but the active provider \
+                     ({}) did not apply it: {err}",
+                    app.provider.name()
+                ));
+            }
             let label = if enabled { "on" } else { "off" };
             app.set_status_notice(format!("Fast mode: {}", label));
             app.push_display_message(DisplayMessage::system(format!(

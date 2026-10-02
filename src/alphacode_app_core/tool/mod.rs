@@ -178,8 +178,23 @@ pub(crate) fn describe_received_arguments(input: &Value) -> String {
                 .to_string()
         }
         Value::Object(map) => {
-            let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            // The truncation marker is bookkeeping we injected, not something the
+            // model sent. Listing it as a "received key" invites the model to
+            // start supplying it, and it crowds out the one key it actually got
+            // wrong.
+            let mut keys: Vec<&str> = map
+                .keys()
+                .map(String::as_str)
+                .filter(|key| *key != crate::alphacode_message_types::TRUNCATED_INPUT_MARKER)
+                .collect();
             keys.sort_unstable();
+            if keys.is_empty() {
+                return "The call carried no arguments of its own — only an internal \
+                        truncation marker. The arguments were cut off before they finished \
+                        arriving; re-send the call, splitting a large value across smaller \
+                        steps."
+                    .to_string();
+            }
             let listed = keys
                 .iter()
                 .map(|key| format!("`{key}`"))
@@ -200,6 +215,351 @@ pub(crate) fn describe_received_arguments(input: &Value) -> String {
             json_type_name(other)
         ),
     }
+}
+
+/// Object keys a model plausibly sends the target URL under when it does not
+/// use the schema's `url`. Matched ASCII-case-insensitively, so `URL`, `Url`
+/// and `url` all resolve to the same entry.
+const URL_ARG_ALIASES: &[&str] = &[
+    "url",
+    "uri",
+    "link",
+    "href",
+    "target",
+    "target_url",
+    "request_url",
+    "url_or_path",
+    "address",
+    "endpoint",
+    "page",
+    "site",
+    "website",
+    "host",
+    "hostname",
+    "domain",
+    "resource",
+    "location",
+    "u",
+];
+
+/// Whether `value` is usable verbatim as a request target, stripping the
+/// quoting characters models add when they echo a URL back from context.
+fn url_candidate(value: &str) -> Option<String> {
+    let trimmed = value
+        .trim()
+        .trim_matches(|c| matches!(c, '`' | '<' | '>' | '"' | '\'' | ' ' | '\t'))
+        .trim();
+    if trimmed.is_empty() || trimmed.len() > 4096 {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://")).then(|| trimmed.to_string())
+}
+
+/// First `http(s)://…` token embedded anywhere in `text`.
+///
+/// Recovers a target from truncated or garbled arguments — the common failure
+/// when a provider's streamed tool-call JSON is cut off mid-string.
+fn url_in_text(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let start = match (lower.find("https://"), lower.find("http://")) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => return None,
+    };
+    let candidate = &text[start..];
+    let end = candidate
+        .find(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '"' | '\'' | '`' | '<' | '>' | '}' | ']' | ')' | '(' | ',' | '\\'
+                )
+        })
+        .unwrap_or(candidate.len());
+    // Prose trails the URL with sentence punctuation ("... see https://x.com."),
+    // which is not part of the address.
+    let candidate = candidate[..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+    url_candidate(candidate)
+}
+
+fn missing_url_error(tool: &str, input: &Value) -> anyhow::Error {
+    missing_field_error(tool, "url", URL_EXAMPLE, input)
+}
+
+/// Recover the target URL from loosely-shaped tool input.
+///
+/// The strict path is a bare `serde_json::from_value`, which fails with
+/// "missing field `url`" for every argument shape a model actually produces:
+/// a different key name (`uri`, `target`, `href`, …), a bare URL string where
+/// an object was expected, a single-element array wrapper, or a payload
+/// truncated mid-JSON by the provider's streaming decoder. Each of those is a
+/// recoverable typo, not a user error, and failing them wastes a whole agent
+/// turn.
+///
+/// Salvage ladder, most trustworthy first:
+/// 1. the documented `url` key, accepted verbatim (it is unambiguous, so a
+///    scheme-less value still gets through and is normalized by the caller);
+/// 2. known alias keys, but only when the value really is an http(s) URL;
+/// 3. *any* string value in the object that is an http(s) URL;
+/// 4. a bare or embedded URL when the whole payload is a string.
+pub(crate) fn coerce_url_arg(input: &Value, tool: &str) -> Result<String> {
+    match input {
+        Value::Object(map) => {
+            if let Some(raw) = map.get("url").and_then(Value::as_str)
+                && !raw.trim().is_empty()
+            {
+                // `url` is unambiguous, so a value that is already a target is
+                // used as-is. Stripping the backticks and quotes a model adds
+                // when it echoes a URL back out of its own context is still
+                // worth doing: those would otherwise be sent to the transport.
+                if let Some(url) = url_candidate(raw) {
+                    return Ok(url);
+                }
+                return Ok(raw.trim().to_string());
+            }
+            for (key, value) in map {
+                let Some(text) = value.as_str() else {
+                    continue;
+                };
+                if !URL_ARG_ALIASES.contains(&key.to_ascii_lowercase().as_str()) {
+                    continue;
+                }
+                if let Some(url) = url_candidate(text) {
+                    return Ok(url);
+                }
+            }
+            // Last resort inside the object: the model picked an unusual key
+            // (`"full_link"`, `"page_url"`, …). Any field that *is* a URL is
+            // unambiguous enough to act on. `serde_json::Map` is a `BTreeMap`
+            // here, so this is deterministic rather than insertion-ordered.
+            for value in map.values() {
+                if let Some(url) = value.as_str().and_then(url_candidate) {
+                    return Ok(url);
+                }
+            }
+            Err(missing_url_error(tool, input))
+        }
+        Value::Array(items) if items.len() == 1 => coerce_url_arg(&items[0], tool),
+        Value::String(text) => url_candidate(text)
+            .or_else(|| url_in_text(text))
+            .ok_or_else(|| missing_url_error(tool, input)),
+        _ => Err(missing_url_error(tool, input)),
+    }
+}
+
+/// Object keys a model plausibly uses for a bare host target (`nmap`,
+/// `subfinder`, `amass`, …) when it does not use the schema's field name.
+const HOST_ARG_ALIASES: &[&str] = &[
+    "target",
+    "host",
+    "hostname",
+    "domain",
+    "ip",
+    "address",
+    "t",
+    "d",
+    "host_name",
+    "site",
+    "server",
+    "addr",
+    "url",
+    "uri",
+    "endpoint",
+];
+
+/// Recover a bare host target (`example.com`, `10.0.0.1`, `example.com:8443`)
+/// from loosely-shaped tool input.
+///
+/// Shares the intent of [`coerce_url_arg`] but deliberately does *not*
+/// require an `http(s)` scheme: recon tools take a host, and a model that sends
+/// `{"hosts": "example.com"}` or a bare `example.com` string means the host.
+/// A value carrying a scheme is unwrapped to its authority, since
+/// `validate_hostname` rejects colons and slashes.
+pub(crate) fn coerce_host_arg(input: &Value, tool: &str, field: &str) -> Result<String> {
+    let bare = |value: &str| -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed.len() > 4096 || trimmed.contains(char::is_whitespace) {
+            return None;
+        }
+        // `https://example.com/path` -> `example.com`
+        if let Some(rest) = trimmed
+            .strip_prefix("http://")
+            .or_else(|| trimmed.strip_prefix("https://"))
+        {
+            let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+            return (!authority.is_empty()).then(|| authority.to_string());
+        }
+        let valid = trimmed.contains('.') || trimmed.contains(':') || trimmed.starts_with('*');
+        valid.then(|| trimmed.to_string())
+    };
+
+    match input {
+        Value::Object(map) => {
+            if let Some(raw) = map.get(field).and_then(Value::as_str)
+                && let Some(host) = bare(raw)
+            {
+                return Ok(host);
+            }
+            for (key, value) in map {
+                let Some(text) = value.as_str() else {
+                    continue;
+                };
+                if !HOST_ARG_ALIASES.contains(&key.to_ascii_lowercase().as_str()) {
+                    continue;
+                }
+                if let Some(host) = bare(text) {
+                    return Ok(host);
+                }
+            }
+            for value in map.values() {
+                if let Some(host) = value.as_str().and_then(bare) {
+                    return Ok(host);
+                }
+            }
+            Err(missing_field_error(tool, field, HOST_EXAMPLE, input))
+        }
+        Value::Array(items) if items.len() == 1 => coerce_host_arg(&items[0], tool, field),
+        Value::String(text) => bare(text)
+            .or_else(|| url_in_text(text).and_then(|u| bare(&u)))
+            .ok_or_else(|| missing_field_error(tool, field, HOST_EXAMPLE, input)),
+        // Anything else (a number, a bool, an array) cannot name a host, but
+        // the fix-it line must still be a host or the model retries the same
+        // number under a different key.
+        _ => Err(missing_field_error(tool, field, HOST_EXAMPLE, input)),
+    }
+}
+
+/// Build the "missing field X" error for one field.
+///
+/// `example` is the value to show in the fix-it line, because the most useful
+/// example is usually field-specific: `webfetch` is told to send a URL, while
+/// `read` is told to send a path. `"..."` would tell the model nothing it did
+/// not already have from the schema.
+fn missing_field_error(tool: &str, field: &str, example: &str, input: &Value) -> anyhow::Error {
+    // Keep the literal "missing field" wording: `is_input_validation_error`
+    // keys off it to keep a malformed call from burning the repeat guard.
+    anyhow::anyhow!(
+        "{tool}: missing field `{field}`. Send {{\"{field}\": {example}}} — the value must be a \
+         non-empty string under the `{field}` key. {}",
+        describe_received_arguments(input)
+    )
+}
+
+/// A URL-shaped example for the `webfetch`/`unfurl` error line.
+const URL_EXAMPLE: &str = "\"https://example.com\"";
+
+/// A path-shaped example for the file tools' error line.
+const PATH_EXAMPLE: &str = "\"/path/to/file\"";
+
+/// A host-shaped example for the recon tools' error line.
+const HOST_EXAMPLE: &str = "\"example.com\"";
+
+/// A shell-command-shaped example for `bash`'s error line.
+pub(crate) const COMMAND_EXAMPLE: &str = "\"ls -la\"";
+
+/// Recover a required free-text argument from loosely-shaped tool input.
+///
+/// The generalisation of [`coerce_url_arg`] for arguments that are neither a
+/// URL nor a host: `websearch`'s `query`, `read`'s `file_path`, and so on. The
+/// documented key is accepted verbatim; the caller's `extra` aliases and then
+/// any single string value are tried in turn, and a bare string payload is
+/// treated as the value itself.
+///
+/// The single-string last resort is only safe when there is exactly one string
+/// field, because it cannot tell which field was meant otherwise. Callers that
+/// need two text arguments from one payload (`write`'s path and body) must use
+/// [`coerce_text_field`], which never guesses.
+pub(crate) fn coerce_text_arg(
+    input: &Value,
+    tool: &str,
+    field: &str,
+    extra: &[&str],
+) -> Result<String> {
+    coerce_text_field(input, tool, field, extra, true, PATH_EXAMPLE)
+}
+
+/// [`coerce_text_arg`] without the single-string fallback.
+///
+/// `write` reads two text arguments out of one payload, so the fallback is not
+/// merely imprecise there — it is destructive. Given `{"file_path": "a.rs"}`
+/// (a call whose body was cut off), the "exactly one string field" rule hands
+/// back `"a.rs"` as the *content*, and the tool writes a file containing its own
+/// path. There is no value of `allow_single_string` that makes that safe, so
+/// this variant is the one a multi-field caller must use.
+pub(crate) fn coerce_text_field(
+    input: &Value,
+    tool: &str,
+    field: &str,
+    extra: &[&str],
+    allow_single_string: bool,
+    example: &str,
+) -> Result<String> {
+    let usable = |value: &str| -> Option<String> {
+        let trimmed = value.trim();
+        (!trimmed.is_empty() && trimmed.len() <= 32_768).then(|| trimmed.to_string())
+    };
+    let lookup = |map: &serde_json::Map<String, Value>, key: &str| -> Option<String> {
+        map.get(key)
+            .and_then(Value::as_str)
+            .and_then(usable)
+            .or_else(|| {
+                // `URL` and `Url` should reach the same entry as `url`.
+                map.iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(key))
+                    .and_then(|(_, v)| v.as_str())
+                    .and_then(usable)
+            })
+    };
+
+    match input {
+        Value::Object(map) => {
+            if let Some(value) = lookup(map, field) {
+                return Ok(value);
+            }
+            for alias in extra {
+                if let Some(value) = lookup(map, alias) {
+                    return Ok(value);
+                }
+            }
+            // Last resort inside the object: exactly one string field. With two
+            // or more there is no way to tell which was meant, and guessing
+            // would send the wrong value rather than an actionable error.
+            if allow_single_string {
+                let mut strings = map.values().filter_map(Value::as_str).filter_map(usable);
+                if let (Some(only), None) = (strings.next(), strings.next()) {
+                    return Ok(only);
+                }
+            }
+            Err(missing_field_error(tool, field, example, input))
+        }
+        Value::Array(items) if items.len() == 1 => {
+            coerce_text_field(&items[0], tool, field, extra, allow_single_string, example)
+        }
+        Value::String(text) => {
+            usable(text).ok_or_else(|| missing_field_error(tool, field, example, input))
+        }
+        _ => Err(missing_field_error(tool, field, example, input)),
+    }
+}
+
+/// Recover a required shell-command argument, without ever guessing.
+///
+/// `bash` carries several optional string fields (`intent`, `justification`), so
+/// the single-string fallback is unsafe here in a way it is not for a
+/// single-field tool: `{"intent": "list the src directory"}` would otherwise be
+/// executed as a command. Only the documented key, its aliases, and an
+/// explicitly-shaped payload are accepted.
+pub(crate) fn coerce_command_field(input: &Value, tool: &str) -> Result<String> {
+    coerce_text_field(
+        input,
+        tool,
+        "command",
+        &["cmd", "commands", "script", "shell"],
+        false,
+        COMMAND_EXAMPLE,
+    )
 }
 
 /// Human-readable JSON type name for an error message.
@@ -394,7 +754,15 @@ pub(crate) fn agent_facing_error(tool_name: &str, error: &anyhow::Error) -> Stri
             }
         }
         "webfetch" | "websearch" | "scrapling" => {
-            if base.contains("timeout") || base.contains("timed out") || base.contains("connect") {
+            if base.contains("missing field") {
+                Some(
+                    "The tool call is missing required fields. For webfetch, provide \
+                     {\"url\": \"https://example.com\"} as a single JSON object.",
+                )
+            } else if base.contains("timeout")
+                || base.contains("timed out")
+                || base.contains("connect")
+            {
                 Some(
                     "The site may be unreachable; retry once, then report the failure and continue with other work.",
                 )
@@ -1202,6 +1570,34 @@ impl Registry {
         // Drop the lock before executing
         drop(tools);
 
+        // A malformed call that has already been rejected repeatedly will not become
+        // well-formed by being repeated. This used to have no bound at all --
+        // validation errors called `clear_failure`, so an identical empty
+        // argument object could be re-sent indefinitely, which is exactly the
+        // observed "eight identical `write` failures in a row" symptom.
+        //
+        // Corrected calls are unaffected: the streak is keyed on the input, so
+        // a fixed call hashes differently and starts from zero.
+        let prior_malformed = repeat_guard::prior_malformed(&ctx.session_id, resolved_name, &input);
+        if prior_malformed >= repeat_guard::MALFORMED_CALL_LIMIT {
+            let last_error = repeat_guard::last_error(&ctx.session_id, resolved_name, true, &input)
+                .map(|e| format!("\nLast error: {e}"))
+                .unwrap_or_default();
+            let received = describe_received_arguments(&input);
+            let msg = format!(
+                "Refusing to run `{resolved_name}` again: this identical malformed call has \
+                 already been rejected {prior_malformed} times in this session. Re-sending it \
+                 byte-for-byte cannot succeed. Either send a call with different arguments, \
+                 switch to a different tool, or explain to the user what is blocking you.{last_error}\n{received}"
+            );
+            crate::logging::warn(&format!(
+                "Malformed-call guard blocked '{resolved_name}' (prior rejections: \
+                 {prior_malformed}) [session {}]",
+                ctx.session_id
+            ));
+            return Err(anyhow::anyhow!(msg));
+        }
+
         // A call that already failed with identical input will not start
         // working; refuse it here so the model gets one corrective message
         // instead of another identical failure to loop on.
@@ -1275,10 +1671,21 @@ impl Registry {
         match &result {
             Ok(_) => repeat_guard::record_success(&ctx.session_id, resolved_name, &input),
             Err(error) if is_input_validation_error(error) => {
-                // Do not turn a correctable schema/argument mistake into a
-                // three-attempt lockout. The model should see the concrete
-                // error, fix the shape, and try again.
-                repeat_guard::clear_failure(&ctx.session_id, resolved_name, &input);
+                // Count it, in its own tier, rather than clearing the streak.
+                //
+                // A *corrected* retry needs no exemption: the streak is keyed on
+                // the input, so a fixed call hashes differently and starts from
+                // zero. What the exemption actually permitted was an unbounded
+                // loop on the identical broken payload -- the same empty
+                // argument object re-sent turn after turn, each one re-reporting
+                // "missing field `file_path`" and burning a round trip. The
+                // limit is deliberately more forgiving than the runtime tier.
+                repeat_guard::record_malformed_with_error(
+                    &ctx.session_id,
+                    resolved_name,
+                    &input,
+                    Some(&crate::util::format_error_chain(error)),
+                );
             }
             Err(error) => repeat_guard::record_failure_with_error(
                 &ctx.session_id,

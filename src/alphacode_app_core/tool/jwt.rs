@@ -119,9 +119,20 @@ impl JwtTool {
 
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 3 {
+            // Two parts is the shape people paste from an `alg:none` token that
+            // lost its trailing dot in transit. Name it, because the generic
+            // "expected 3 parts" reads like the token itself is broken and
+            // sends the agent looking for a different problem.
+            let hint = if parts.len() == 2 {
+                " An unsecured `alg:none` token still has a trailing dot: \
+                 header.payload. — add the final `.` and retry."
+            } else {
+                ""
+            };
             return Err(anyhow::anyhow!(
-                "Invalid JWT: expected 3 parts, got {}. Format: header.payload.signature",
-                parts.len()
+                "Invalid JWT: expected 3 parts, got {}. Format: header.payload.signature.{}",
+                parts.len(),
+                hint
             ));
         }
 
@@ -300,8 +311,17 @@ impl JwtTool {
             ));
         };
 
+        // Unsecured JWS (RFC 7519 §6): for `alg: none` the signature is the
+        // empty string, but the trailing dot is still part of the compact
+        // serialization — the token is `header.payload.`, not `header.payload`.
+        //
+        // This mattered: the two-part form is rejected as malformed by strict
+        // servers, and `decode` below rejects it as "expected 3 parts". An
+        // agent following the `hunt-jwt` skill would send it, see it fail, and
+        // wrongly conclude the alg:none bypass does not work — a missed
+        // finding caused by our own encoding, not by the target.
         let token = if signature.is_empty() {
-            format!("{header_b64}.{payload_b64}")
+            format!("{header_b64}.{payload_b64}.")
         } else {
             format!("{header_b64}.{payload_b64}.{signature}")
         };
@@ -420,9 +440,11 @@ impl JwtTool {
             }
         };
 
-        // Same unsecured-JWS rule as `forge_token`: no trailing dot.
+        // Unsecured JWS (RFC 7519 §6): the signature is the empty string, but
+        // the separating dot is still part of the serialization, so the token
+        // is `header.payload.` — three parts with an empty third.
         let token = if signature.is_empty() {
-            format!("{header_b64}.{payload_b64}")
+            format!("{header_b64}.{payload_b64}.")
         } else {
             format!("{header_b64}.{payload_b64}.{signature}")
         };
@@ -508,5 +530,29 @@ mod tests {
         let encoded = encode_base64_url("hello");
         assert!(!encoded.contains('+'));
         assert!(!encoded.contains('/'));
+    }
+
+    /// Regression: `forge` with `algorithm: "none"` emitted a two-part token.
+    ///
+    /// The `hunt-jwt` skill tells the agent to forge with this tool and send the
+    /// result to the endpoint. A two-part token is not a valid compact JWS, so
+    /// strict servers reject it as malformed — the agent then reports "alg:none
+    /// does not work" and the finding is missed. The cause was our encoder, not
+    /// the target.
+    #[test]
+    fn alg_none_forge_emits_the_three_part_unsecured_form() {
+        let token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.";
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "unsecured JWS keeps the trailing dot, so it is still three parts"
+        );
+        assert!(parts[2].is_empty(), "the signature is the empty string");
+        assert!(token.ends_with('.'), "must end with the separating dot");
+        // And it must round-trip through our own decoder, which is the step the
+        // skill tells the agent to run before sending it anywhere.
+        let decoded = decode_base64_url(parts[0]).expect("header decodes");
+        assert!(decoded.contains("none"));
     }
 }

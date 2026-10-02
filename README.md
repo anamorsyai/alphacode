@@ -1008,7 +1008,7 @@ The installer can:
 * Download the latest release
 * Verify SHA-256 checksums
 * Install `alphacode.exe`
-* Add AlphaCode to the user PATH
+* Add AlphaCode to your user PATH (opt-in, see below)
 * Run without administrator privileges
 
 Pin a version:
@@ -1023,6 +1023,26 @@ Build from source:
 iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -FromSource
 ```
 
+Add to your user PATH:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -AddPath
+```
+
+Preview what `-AddPath` would change, without writing anything:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -AddPath -PathDryRun
+```
+
+`-AddPath` is conservative by design: it writes only `HKCU\Environment\Path`
+(never the machine-wide PATH), appends rather than prepends so no existing
+entry changes precedence, is a no-op on a re-run, and broadcasts
+`WM_SETTINGCHANGE` so new terminals pick it up. It deliberately does **not**
+rewrite the PATH of the shell you ran it from — open a new terminal instead.
+Entries using `%USERPROFILE%`-style references keep working, because the value
+is read and written unexpanded.
+
 ---
 
 ## macOS / Linux
@@ -1036,6 +1056,13 @@ Pin a release:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh \
   | bash -s -- --version vX.Y.Z
+```
+
+Add to your shell profile (bash/zsh/fish/nushell/csh/ksh, idempotent):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh \
+  | bash -s -- --add-path
 ```
 
 Verify:

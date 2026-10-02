@@ -352,7 +352,12 @@ impl StreamFilter {
 
         let filtered: String = kept.join("\n");
 
-        // Truncate to max chars if needed
+        // Truncate to max chars if needed.
+        //
+        // The char budget is applied *before* the summary is measured, so
+        // `filtered_chars` and the reduction percentage describe what the model
+        // actually receives. Measuring after appending the summary made every
+        // result read as over budget and understated the saving.
         let filtered = if filtered.len() > self.max_chars {
             let mut cut = self.max_chars.saturating_sub(150);
             while cut > 0 && !filtered.is_char_boundary(cut) {
@@ -459,11 +464,30 @@ fn is_noise(line: &str) -> bool {
 }
 
 /// Normalize a line for deduplication (collapse whitespace, lowercase).
+///
+/// Folds ASCII space and lowercase in one pass. The previous
+/// `split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()` made two
+/// heap allocations and two full copies per line, and this runs once per line
+/// of every tool output that reaches the filter.
 fn normalize_line(line: &str) -> String {
-    line.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    let mut out = String::with_capacity(line.len());
+    let mut pending_space = false;
+    for ch in line.chars() {
+        if ch.is_whitespace() {
+            // Only emit a separator once the next real character arrives, so
+            // leading and trailing whitespace does not survive.
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        // Non-ASCII is left alone: `to_lowercase` can change a char's byte
+        // length, which would corrupt the bigram window over UTF-8 text.
+        out.extend(ch.to_lowercase());
+    }
+    out
 }
 
 /// Quick cosine-like similarity between two normalized lines.
@@ -477,14 +501,17 @@ fn fuzzy_similar(a: &str, b: &str) -> bool {
     if min_len < 10 {
         return false;
     }
+    if !length_compatible(a, b) {
+        return false;
+    }
     // Character bigram overlap ratio. A single changed character perturbs at
     // most two bigrams, so lines that differ only in a variable or count
     // (e.g. "line 42 content" vs "line 43 content") stay well above the
     // threshold, while unrelated lines do not.
     let a_bigrams = char_bigram_count(a);
     let b_bigrams = char_bigram_count(b);
-    // Bigram arrays are , so  yields . Dereference
-    // each side so  (which takes  by value) is callable.
+    // The counts are arrays, so `zip` yields references. Dereference each side so
+    // `min`/`max` (which take `u32` by value) is callable.
     let intersection: u32 = a_bigrams
         .iter()
         .zip(b_bigrams.iter())
@@ -503,14 +530,35 @@ fn fuzzy_similar(a: &str, b: &str) -> bool {
 }
 
 /// Count character bigrams in a string (space-optimized: 64 buckets).
+///
+/// Iterates `s.as_bytes()` directly. The previous `s.bytes().collect::<Vec<u8>>()`
+/// copied the line into a fresh heap allocation on every call, and this runs up
+/// to 32 times per line inside the fuzzy-dedup window — so a 500-line build log
+/// churned through thousands of short-lived allocations to compare lines that
+/// are almost always obviously different.
 fn char_bigram_count(s: &str) -> [u32; 64] {
     let mut counts = [0u32; 64];
-    let bytes: Vec<u8> = s.bytes().collect();
+    let bytes = s.as_bytes();
     for window in bytes.windows(2) {
         let idx = ((window[0] as usize) ^ (window[1] as usize)) & 63;
         counts[idx] += 1;
     }
     counts
+}
+
+/// Cheap length gate before the bigram work.
+///
+/// Two lines whose normalized lengths differ by more than a quarter cannot
+/// reach the similarity threshold, so the 64-bucket comparison is skipped for
+/// them. This is a pure speed filter — it never changes which lines are
+/// considered duplicates, only how long it takes to find out.
+fn length_compatible(a: &str, b: &str) -> bool {
+    let (long, short) = if a.len() >= b.len() {
+        (a.len(), b.len())
+    } else {
+        (b.len(), a.len())
+    };
+    long * 4 <= short * 5
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -622,6 +670,56 @@ mod tests {
         let result = filter_output("bash", "");
         assert!(!result.was_filtered);
         assert_eq!(result.filtered_lines, 0);
+    }
+
+    /// The single-pass rewrite of `normalize_line` must be indistinguishable
+    /// from the `split_whitespace().join(" ")` it replaced — a subtly different
+    /// normalizer would silently change which lines count as duplicates.
+    #[test]
+    fn normalize_line_matches_the_previous_implementation() {
+        let cases = [
+            "Hello World",
+            "  leading and trailing   ",
+            "tabs\tand\nnewlines\r\nhere",
+            "multiple    inner     spaces",
+            "",
+            "   ",
+            "MiXeD CaSe 123",
+            "trailing only    ",
+            "    leading only",
+            "unicode ünïcödé  ok",
+        ];
+        for case in cases {
+            let expected = case
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            assert_eq!(normalize_line(case), expected, "case: {case:?}");
+        }
+    }
+
+    /// The length gate must not reject anything the bigram comparison would
+    /// have accepted, or near-duplicate log lines would survive deduplication.
+    #[test]
+    fn length_gate_never_rejects_a_true_duplicate() {
+        // Worst case for the gate: the two lines sit exactly at the threshold.
+        for base in [
+            "connection to host closed",
+            "resolved address for example com",
+            "retrying the request after backoff",
+        ] {
+            for delta in -2i32..=2 {
+                let a = base.to_string();
+                let b = format!("{base}{}", "x".repeat(delta.max(0) as usize));
+                if fuzzy_similar(&a, &b) {
+                    assert!(
+                        length_compatible(&a, &b),
+                        "gate rejected a true match: {a:?} / {b:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

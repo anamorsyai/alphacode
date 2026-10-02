@@ -18,14 +18,20 @@ impl WebSearchTool {
     }
 }
 
-#[derive(Deserialize)]
+/// Engine names accepted for `engine`, resolved leniently.
+///
+/// This used to be `Option<WebSearchEngine>`, so a model that sent
+/// `"google"` or `"ddg"` got a hard serde failure naming one field at a time.
+/// Every engine name the tool actually supports is listed here, and anything
+/// else falls through to the configured default rather than failing the search.
+fn parse_engine(value: &str) -> Option<WebSearchEngine> {
+    WebSearchEngine::parse(value)
+}
+
 struct WebSearchInput {
     query: String,
-    #[serde(default)]
     num_results: Option<usize>,
-    #[serde(default)]
     engine: Option<WebSearchEngine>,
-    #[serde(default)]
     bing_market: Option<String>,
 }
 
@@ -85,7 +91,31 @@ impl Tool for WebSearchTool {
     }
 
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput> {
-        let params: WebSearchInput = serde_json::from_value(input)?;
+        // `query` is recovered rather than deserialized, because the models that
+        // mistype it here send it under a different key entirely, and search is
+        // the tool they reach for when they are stuck — a failed query costs the
+        // most expensive kind of turn.
+        let query = super::coerce_text_arg(
+            &input,
+            "websearch",
+            "query",
+            &["q", "search", "term", "text", "keywords"],
+        )?;
+        let params = WebSearchInput {
+            query,
+            num_results: input
+                .get("num_results")
+                .and_then(Value::as_u64)
+                .map(|n| n as usize),
+            engine: input
+                .get("engine")
+                .and_then(Value::as_str)
+                .and_then(parse_engine),
+            bing_market: input
+                .get("bing_market")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        };
         let num_results = params.num_results.unwrap_or(8).min(20);
 
         let config = crate::config::config();

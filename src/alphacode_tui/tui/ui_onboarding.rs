@@ -7,7 +7,7 @@
 //! Layout, top to bottom, vertically centered in the chat area:
 //!   1. Grayed telemetry notice header.
 //!   2. The animated donut (attention grab).
-//!   3. "Welcome to alphacode onboarding" title.
+//!   3. "Welcome to alphacode" title.
 //!   4. The login / getting-started prompt with suggestions.
 //!
 //! The donut is drawn as a live widget (not part of the cached transcript) so

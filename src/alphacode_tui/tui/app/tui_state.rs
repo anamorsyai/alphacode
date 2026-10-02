@@ -1902,6 +1902,12 @@ impl crate::alphacode_tui::tui::TuiState for App {
             .map(|scroll| (scroll, self.model_status_content.as_str()))
     }
 
+    fn config_overlay(
+        &self,
+    ) -> Option<&crate::alphacode_tui::tui::config_overlay::ConfigOverlayState> {
+        self.config_overlay.as_ref()
+    }
+
     fn session_picker_overlay(
         &self,
     ) -> Option<&RefCell<crate::alphacode_tui::tui::session_picker::SessionPicker>> {

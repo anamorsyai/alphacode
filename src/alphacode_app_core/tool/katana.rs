@@ -10,7 +10,7 @@ const DEFAULT_THREADS: usize = 50;
 
 pub struct KatanaTool;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct KatanaInput {
     url: String,
     #[serde(default)]
@@ -41,6 +41,44 @@ struct KatanaInput {
     include_body: bool,
     #[serde(default)]
     include_params: bool,
+}
+
+/// Recover the seed URL before deserializing the rest.
+///
+/// Splitting the required `url` out of the struct means one mistyped optional
+/// field (`"depth": "3"`, `"headers": "Accept: */*"`) can no longer take the
+/// whole crawl down with it.
+fn normalize_katana_input(input: &Value) -> Result<KatanaInput> {
+    let url = super::coerce_url_arg(input, "katana")?;
+    let with_url = |mut map: serde_json::Map<String, Value>| {
+        map.insert("url".to_string(), Value::String(url.clone()));
+        map
+    };
+    let base = input.as_object().cloned().unwrap_or_default();
+
+    // Preferred path: every optional field is the documented type.
+    if let Ok(params) = serde_json::from_value::<KatanaInput>(Value::Object(with_url(base.clone())))
+    {
+        return Ok(params);
+    }
+    // Otherwise retry without each field in turn. A crawl is expensive to set up
+    // and expensive to abandon, so dropping one unusable optional field is
+    // always better than refusing the call.
+    for key in base.keys() {
+        if key == "url" {
+            continue;
+        }
+        let mut trial = base.clone();
+        trial.remove(key);
+        if let Ok(params) = serde_json::from_value::<KatanaInput>(Value::Object(with_url(trial))) {
+            crate::logging::debug(&format!(
+                "katana: ignoring unusable `{key}` from the request"
+            ));
+            return Ok(params);
+        }
+    }
+    // Nothing salvageable; report the original complaint.
+    serde_json::from_value::<KatanaInput>(Value::Object(with_url(base))).map_err(Into::into)
 }
 
 #[async_trait]
@@ -109,7 +147,10 @@ impl Tool for KatanaTool {
     }
 
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput> {
-        let params: KatanaInput = serde_json::from_value(input)?;
+        // The seed URL is recovered rather than deserialized, so a bare string,
+        // an alias key, or a truncated payload still starts the crawl instead
+        // of failing with "missing field `url`" before any request is made.
+        let params = normalize_katana_input(&input)?;
         let args = build_args(&params)?;
 
         let output = super::recon_common::run_bounded(
@@ -256,6 +297,63 @@ fn build_args(params: &KatanaInput) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    /// The seed URL is the only field that must be right; everything else is
+    /// optional. These are the shapes that used to fail before any crawl
+    /// started, costing a full agent turn.
+    #[test]
+    fn normalizes_the_seed_url_from_the_shapes_models_emit() {
+        let parse = |v: serde_json::Value| {
+            normalize_katana_input(&v).expect("seed url should be recovered")
+        };
+
+        assert_eq!(parse(json!({"url": "https://a.com"})).url, "https://a.com");
+        // Alias keys.
+        for key in ["uri", "target", "link", "href"] {
+            assert_eq!(
+                parse(json!({ key: "https://a.com" })).url,
+                "https://a.com",
+                "alias {key} was not recovered"
+            );
+        }
+        // Bare string, and a single-element array wrapper.
+        assert_eq!(parse(json!("https://a.com")).url, "https://a.com");
+        assert_eq!(
+            parse(json!([{"url": "https://a.com"}])).url,
+            "https://a.com"
+        );
+        // Optional fields still parse as documented.
+        let params = parse(json!({"url": "https://a.com", "depth": 5, "robots": true}));
+        assert_eq!(params.depth, Some(5));
+        assert!(params.robots);
+    }
+
+    /// A single mistyped optional field must not take the whole crawl down: the
+    /// field is dropped and the rest is honoured, because abandoning a crawl
+    /// costs far more than ignoring one flag.
+    #[test]
+    fn a_mistyped_optional_field_is_dropped_not_fatal() {
+        let params = normalize_katana_input(&json!({
+            "url": "https://a.com",
+            "depth": 5,
+            // `depth` is an int; a string is a very common provider coercion.
+            "threads": "20",
+        }))
+        .expect("crawl should start despite the bad field");
+        assert_eq!(params.depth, Some(5));
+        // The unusable field is ignored rather than guessed at.
+        assert_eq!(params.threads, None);
+    }
+
+    #[test]
+    fn a_missing_seed_url_is_reported_actionably() {
+        let err = normalize_katana_input(&json!({"depth": 3}))
+            .expect_err("no seed url means no crawl")
+            .to_string();
+        assert!(err.contains("missing field `url`"), "{err}");
+        assert!(err.contains("https://example.com"), "{err}");
+    }
 
     #[test]
     fn test_build_args_basic() {

@@ -54,6 +54,7 @@ pub(crate) use redraw_schedule::{
     periodic_redraw_required_excluding_idle_animation, redraw_interval,
     redraw_interval_with_policy,
 };
+pub mod config_overlay;
 pub mod keymap_overview;
 mod remote_diff;
 pub mod screenshot;
@@ -586,6 +587,10 @@ pub trait TuiState {
     fn help_scroll(&self) -> Option<usize>;
     /// Model status overlay scroll offset and markdown content (None = not showing)
     fn model_status_overlay(&self) -> Option<(usize, &str)> {
+        None
+    }
+    /// Interactive config overlay (None = not showing)
+    fn config_overlay(&self) -> Option<&config_overlay::ConfigOverlayState> {
         None
     }
     /// Session picker overlay for /resume command

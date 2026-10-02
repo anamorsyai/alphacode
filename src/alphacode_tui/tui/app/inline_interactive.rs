@@ -1,4 +1,5 @@
 use super::*;
+use crate::alphacode_tui::tui::config_overlay::ConfigOverlayState;
 use crate::alphacode_tui::tui::session_picker::{
     self, OverlayAction, PickerResult, ResumeTarget, SessionPicker,
 };
@@ -2229,6 +2230,131 @@ impl App {
                 self.open_account_center(provider_filter.as_deref())
             }
         }
+    }
+}
+
+/// Word for a boolean, matching the overlay's on/off marker.
+fn on_off(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
+}
+
+impl App {
+    /// Open the interactive settings overlay (`/config ui`).
+    ///
+    /// Every row persists through the same `Config` setters the typed
+    /// `/config set …` commands use, so flipping a switch here and typing the
+    /// command produce the same `config.toml` — there is no second, divergent
+    /// path for the same preference.
+    pub(super) fn open_config_overlay(&mut self) {
+        self.config_overlay = Some(ConfigOverlayState::new());
+    }
+
+    /// Whether a mouse position is inside the settings overlay's box.
+    ///
+    /// Uses the rectangle the overlay was actually painted into. `false` when it
+    /// has never been painted, which leaves the overlay open rather than
+    /// dismissing it on the basis of a rectangle that does not exist.
+    pub(super) fn mouse_over_config_overlay(&self, mouse: MouseEvent) -> bool {
+        let Some(rect) = crate::alphacode_tui::tui::config_overlay::painted_frame() else {
+            return false;
+        };
+        super::super::layout_utils::point_in_rect(mouse.column, mouse.row, rect)
+    }
+
+    /// Key handling for the settings overlay.
+    ///
+    /// Consumes the overlay's own keys and returns; anything else is ignored so
+    /// the modal router does not also feed it to the composer. Callers treat the
+    /// overlay as modal regardless, which is why no "handled" flag is returned.
+    ///
+    /// Shared with the mouse handler, which synthesises `Up`/`Down` for the
+    /// wheel so the two input paths cannot drift apart.
+    pub(super) fn handle_config_overlay_key(&mut self, code: KeyCode) {
+        let Some(selected) = self.config_overlay.as_ref().map(|state| state.selected) else {
+            return;
+        };
+        let len = crate::alphacode_tui::tui::config_overlay::settings().len();
+
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.config_overlay = None;
+                return;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let next = selected.saturating_sub(1);
+                if let Some(state) = self.config_overlay.as_mut() {
+                    state.selected =
+                        crate::alphacode_tui::tui::config_overlay::clamp_selection(next, len);
+                    state.notice = None;
+                }
+                self.request_full_repaint();
+                return;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let next = selected.saturating_add(1);
+                if let Some(state) = self.config_overlay.as_mut() {
+                    state.selected =
+                        crate::alphacode_tui::tui::config_overlay::clamp_selection(next, len);
+                    state.notice = None;
+                }
+                self.request_full_repaint();
+                return;
+            }
+            KeyCode::Home => {
+                if let Some(state) = self.config_overlay.as_mut() {
+                    state.selected = 0;
+                    state.notice = None;
+                }
+                self.request_full_repaint();
+                return;
+            }
+            KeyCode::End => {
+                let last = len.saturating_sub(1);
+                if let Some(state) = self.config_overlay.as_mut() {
+                    state.selected = last;
+                    state.notice = None;
+                }
+                self.request_full_repaint();
+                return;
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => {}
+            // Anything else belongs to the composer, not the overlay.
+            _ => return,
+        }
+
+        // Toggle. Re-read the list rather than trusting the value rendered last
+        // frame: a row can be flipped by two keys before the next draw, and
+        // toggling a stale `current` would write the value it already had.
+        let settings = crate::alphacode_tui::tui::config_overlay::settings();
+        let index =
+            crate::alphacode_tui::tui::config_overlay::clamp_selection(selected, settings.len());
+        let Some(setting) = settings.get(index) else {
+            return;
+        };
+        let next = !setting.current;
+        (setting.on_toggle)(next);
+        if let Some(state) = self.config_overlay.as_mut() {
+            // Read the value back rather than assuming the write landed.
+            // `mutate_config` can fail on a read-only or malformed file, and a
+            // switch that reads "on" while the value did not change is worse
+            // than no feedback at all.
+            let persisted = crate::alphacode_tui::tui::config_overlay::settings()
+                .get(index)
+                .map(|s| s.current)
+                .unwrap_or(next);
+            state.notice = Some(if persisted == next {
+                (format!("{} is now {}", setting.label, on_off(next)), false)
+            } else {
+                (
+                    format!(
+                        "{} did not save - check that config.toml is writable",
+                        setting.label
+                    ),
+                    true,
+                )
+            });
+        }
+        self.request_full_repaint();
     }
 
     pub(super) fn open_session_picker(&mut self) {

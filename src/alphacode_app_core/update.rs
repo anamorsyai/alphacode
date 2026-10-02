@@ -287,6 +287,85 @@ fn checksum_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     release.assets.iter().find(|a| a.name == "SHA256SUMS")
 }
 
+/// Maximum attempts to fetch `SHA256SUMS`, including the first.
+///
+/// The release assets and `SHA256SUMS` do not appear at the same moment.
+/// In `release.yml` every `build` job uploads its archive straight to the
+/// release, and the separate `release` job merges and uploads `SHA256SUMS`
+/// afterwards. So a client can legitimately observe a release that lists
+/// `SHA256SUMS` while that very URL is still propagating, and GitHub answers
+/// `404` for a short window. The archive download already tolerates far worse
+/// (10 attempts with HTTP Range resume); fetching a 571-byte text file with no
+/// retry at all meant a single transient 404 aborted the entire update.
+const CHECKSUM_MAX_ATTEMPTS: u32 = 6;
+/// Initial backoff between `SHA256SUMS` fetch attempts.
+const CHECKSUM_RETRY_BACKOFF_INITIAL: Duration = Duration::from_secs(2);
+/// Maximum backoff between `SHA256SUMS` fetch attempts.
+const CHECKSUM_RETRY_BACKOFF_MAX: Duration = Duration::from_secs(16);
+
+/// Whether a failed `SHA256SUMS` fetch is worth retrying.
+///
+/// `404` is the interesting one: the asset is listed in the release response,
+/// so its absence at the CDN edge is propagation lag, not a downgrade. `403`
+/// can be a short-lived rate limit. Both resolve on their own. Any other
+/// status is treated as final so a genuine problem still surfaces promptly.
+fn is_retryable_checksum_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::NOT_FOUND
+        || status == reqwest::StatusCode::FORBIDDEN
+        || status.is_server_error()
+}
+
+fn fetch_checksum_manifest(client: &reqwest::blocking::Client, url: &str) -> Result<String> {
+    let mut last_status: Option<reqwest::StatusCode> = None;
+    let mut last_error: Option<reqwest::Error> = None;
+
+    for attempt in 0..CHECKSUM_MAX_ATTEMPTS {
+        if attempt > 0 {
+            let backoff = CHECKSUM_RETRY_BACKOFF_INITIAL
+                .mul_f32(2_f32.powi((attempt - 1) as i32))
+                .min(CHECKSUM_RETRY_BACKOFF_MAX);
+            crate::logging::info(&format!(
+                "Retrying SHA256SUMS download in {}s (attempt {}/{})",
+                backoff.as_secs(),
+                attempt + 1,
+                CHECKSUM_MAX_ATTEMPTS
+            ));
+            std::thread::sleep(backoff);
+        }
+
+        match client.get(url).send() {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    return response.text().context("Failed to read SHA256SUMS");
+                }
+                if !is_retryable_checksum_status(status) {
+                    anyhow::bail!("SHA256SUMS download failed: {}", status);
+                }
+                last_status = Some(status);
+            }
+            Err(error) => {
+                // Transport hiccups (DNS, reset connection) are worth one more go.
+                last_error = Some(error);
+            }
+        }
+    }
+
+    // Every attempt was a retryable failure. Stay fail-closed — the whole point
+    // of the check is that we never install unverified — but say what happened
+    // so the user knows to simply run the update again rather than concluding
+    // their install is broken.
+    let detail = match (last_status, last_error) {
+        (Some(status), _) => format!("still {status} after {CHECKSUM_MAX_ATTEMPTS} attempts"),
+        (None, Some(error)) => format!("{error}"),
+        _ => "unknown error".to_string(),
+    };
+    anyhow::bail!(
+        "SHA256SUMS download failed: {detail}. The release may still be publishing — \
+         wait a minute and run the update again."
+    );
+}
+
 fn verify_asset_checksum_if_available(
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
@@ -302,20 +381,17 @@ fn verify_asset_checksum_if_available(
         // client would silently install them unverified. Anyone who can
         // influence the release response reaches the same downgrade just by
         // omitting the asset, so its absence must be fatal rather than logged.
+        //
+        // Note this is deliberately *not* retried: the asset being absent from
+        // the release payload is a real condition, not propagation lag, and
+        // retrying would only delay refusing it.
         anyhow::bail!(
             "Release {} does not publish SHA256SUMS; refusing to install an unverified binary",
             release.tag_name
         );
     };
 
-    let response = client
-        .get(&checksum_asset.browser_download_url)
-        .send()
-        .context("Failed to download SHA256SUMS")?;
-    if !response.status().is_success() {
-        anyhow::bail!("SHA256SUMS download failed: {}", response.status());
-    }
-    let contents = response.text().context("Failed to read SHA256SUMS")?;
+    let contents = fetch_checksum_manifest(client, &checksum_asset.browser_download_url)?;
     verify_asset_checksum_text(&contents, &asset.name, bytes)?;
     crate::logging::info(&format!("Verified SHA256 checksum for {}", asset.name));
     Ok(())
@@ -1438,40 +1514,92 @@ mod tests {
     }
 
     /// The zip-slip protections must survive the fix: traversal, absolute, and
-    /// nested entries are skipped, and nothing is written outside the root.
+    /// nested entries are all skipped, and nothing lands outside the root.
+    ///
+    /// The load-bearing assertion is the *escape* one. Note what this
+    /// deliberately does NOT assert: that a top-level entry refuses to
+    /// overwrite an existing file in the extraction root. That is not a
+    /// property the extractor has or needs. The root is a private temp
+    /// directory the updater creates and owns for the duration of one install
+    /// (removed and recreated just before extraction), so writing
+    /// `alphacode.exe` into it is the intended behaviour, not a hazard.
+    /// Conflating "must not escape" with "must not overwrite" made an earlier
+    /// version of this test fail against correct code.
     #[test]
     fn test_extract_zip_asset_skips_escaping_and_nested_entries() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let sentinel = dir.path().join("sentinel.txt");
-        fs::write(&sentinel, b"untouched").expect("write sentinel");
+        let outer = tempfile::tempdir().expect("tempdir");
+        let extract_dir = outer.path().join("extract");
+        fs::create_dir_all(&extract_dir).expect("create extract dir");
+
+        // One level above the root, which is exactly where a successful `..`
+        // traversal would land.
+        let outside = outer.path().join("outside.txt");
+        fs::write(&outside, b"untouched").expect("write sentinel");
 
         let bytes = build_zip(&[
-            ("../escaped.txt", b"nope"),
-            ("nested/inner.txt", b"nope"),
-            ("/absolute.txt", b"nope"),
-            ("sentinel.txt", b"clobbered"),
+            ("../outside.txt", b"escaped"),
+            ("nested/inner.txt", b"nested"),
+            ("/absolute.txt", b"absolute"),
         ]);
 
-        // Must not panic or error out; hostile entries are skipped, not fatal.
-        extract_zip_asset_into(&bytes, dir.path()).expect("hostile entries are skipped");
+        // Hostile entries are skipped, not fatal.
+        extract_zip_asset_into(&bytes, &extract_dir).expect("hostile entries are skipped");
 
         assert_eq!(
-            fs::read(&sentinel).expect("sentinel"),
+            fs::read(&outside).expect("sentinel"),
             b"untouched",
-            "a zip entry must never overwrite an existing file in the root"
+            "a `..` entry escaped the extraction root and clobbered a file outside it"
         );
         assert!(
-            !dir.path()
-                .parent()
-                .expect("parent")
-                .join("escaped.txt")
-                .exists(),
-            "a `..` entry escaped the extraction root"
+            !extract_dir.join("nested").exists(),
+            "a nested entry created a subdirectory instead of being skipped"
         );
         assert!(
-            !dir.path().join("nested").exists(),
-            "a nested entry created a subdirectory"
+            !extract_dir.join("absolute.txt").exists(),
+            "an absolute entry was written instead of being skipped"
         );
+        assert!(
+            !extract_dir.join("outside.txt").exists(),
+            "a `..` entry was flattened into the root instead of being skipped"
+        );
+    }
+
+    /// Regression: a transient 404 on `SHA256SUMS` must be retried, not fatal.
+    ///
+    /// The release archives are uploaded by the per-platform `build` jobs while
+    /// `SHA256SUMS` is merged and uploaded afterwards by the `release` job, so
+    /// there is a window where the release lists `SHA256SUMS` but the CDN has
+    /// not propagated it. The fetch previously had no retry at all, so that
+    /// window aborted the whole update with
+    /// `SHA256SUMS download failed: 404 Not Found` — which is exactly what a
+    /// 1.0.65 client hit auto-updating to 1.0.67.
+    #[test]
+    fn test_checksum_404_is_retryable() {
+        assert!(is_retryable_checksum_status(reqwest::StatusCode::NOT_FOUND));
+        assert!(is_retryable_checksum_status(reqwest::StatusCode::FORBIDDEN));
+        assert!(is_retryable_checksum_status(
+            reqwest::StatusCode::BAD_GATEWAY
+        ));
+        assert!(is_retryable_checksum_status(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        ));
+    }
+
+    /// The retry must not swallow genuine, permanent failures — otherwise a
+    /// real problem turns into a 60-second stall before reporting itself.
+    #[test]
+    fn test_checksum_permanent_status_is_not_retryable() {
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::GONE,
+            reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+        ] {
+            assert!(
+                !is_retryable_checksum_status(status),
+                "{status} must not be retried"
+            );
+        }
     }
 
     #[test]

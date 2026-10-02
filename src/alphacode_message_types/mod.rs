@@ -601,6 +601,164 @@ fn try_recover_url_object(text: &str) -> Option<serde_json::Value> {
     Some(serde_json::Value::Object(map))
 }
 
+/// Reserved key stamped into a payload rebuilt from a truncated argument
+/// stream, so tools that *overwrite* something can tell a salvaged call apart
+/// from a complete one. Leading underscores keep it out of every schema's
+/// namespace, and `serde` ignores unknown fields by default, so tools that do
+/// not care are unaffected.
+pub const TRUNCATED_INPUT_MARKER: &str = "__truncated_input";
+
+/// Index just past the closing quote of the string starting at `start`, or
+/// `None` when the string never terminates — i.e. the text was cut off inside it.
+fn string_literal_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'"' => return Some(i + 1),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// Byte offset just past the complete JSON value beginning at `start`.
+///
+/// Returns `None` when the value runs off the end of the text, which is
+/// exactly the case that must *not* be recovered: a string cut mid-escape
+/// would otherwise be handed to the tool as if it were the whole value, and
+/// for `write` that means writing a half file over a whole one.
+fn complete_value_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let first = *bytes.get(start)?;
+    if first == b'"' {
+        return string_literal_end(bytes, start);
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, &b) in bytes[start..].iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + offset + 1);
+                }
+            }
+            b',' if depth == 0 => return Some(start + offset),
+            _ => {}
+        }
+    }
+    // A bare scalar running to the end of the text. Only the fixed-width
+    // literals are safe: a number ending at the cutoff may have had more digits
+    // that never arrived.
+    if !in_string && depth == 0 && matches!(first, b't' | b'f' | b'n') {
+        return Some(bytes.len());
+    }
+    None
+}
+
+/// Rebuild an argument object from a JSON payload that was cut off mid-stream.
+///
+/// Every provider truncates tool arguments at some token ceiling, and a long
+/// `write` body or a wide `bash` command is the most likely thing in any
+/// session to hit it. The decoder then hands the tool an *empty* object, so
+/// the tool reports "missing field `file_path`" for a call the model made
+/// correctly — and the model retries the identical call until the repeat guard
+/// blocks it. Everything that *did* arrive is still on the wire; this reads the
+/// complete key/value pairs back out of it.
+///
+/// Only complete pairs are recovered, and a payload is marked with
+/// [`TRUNCATED_INPUT_MARKER`] when its root object never closed, so callers
+/// that overwrite can decide for themselves whether a partial value is safe to
+/// act on.
+fn try_recover_truncated_object(text: &str) -> Option<serde_json::Value> {
+    if !text.contains('{') {
+        return None;
+    }
+    let bytes = text.as_bytes();
+    let mut map = serde_json::Map::new();
+    let mut depth = 0usize;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' | b'[' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' | b']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                i += 1;
+            }
+            b'"' => {
+                let Some(after) = string_literal_end(bytes, i) else {
+                    // Cut off inside this string: nothing further is complete.
+                    break;
+                };
+                let key = serde_json::from_str::<String>(&text[i..after]).ok();
+                // Top-level object members only. A key nested inside a value
+                // that was recovered wholesale is part of that value already.
+                if depth != 1 || key.is_none() {
+                    i = after;
+                    continue;
+                }
+                let mut j = after;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j >= bytes.len() || bytes[j] != b':' {
+                    i = after;
+                    continue;
+                }
+                j += 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let Some(end) = complete_value_end(text, j) else {
+                    break;
+                };
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text[j..end])
+                    && let Some(key) = key
+                {
+                    map.insert(key, value);
+                }
+                i = end;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if map.is_empty() {
+        return None;
+    }
+    if depth > 0 {
+        map.insert(
+            TRUNCATED_INPUT_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    Some(serde_json::Value::Object(map))
+}
+
 impl ToolCall {
     pub fn normalize_input_to_object(input: serde_json::Value) -> serde_json::Value {
         match input {
@@ -674,6 +832,12 @@ impl ToolCall {
                 if let Some(recovered) = try_recover_url_object(trimmed) {
                     return recovered;
                 }
+                // Then: truncated JSON carrying *other* complete fields — the
+                // `write`/`edit`/`bash` shape, where the cut off part is the
+                // long string body rather than the URL.
+                if let Some(recovered) = try_recover_truncated_object(trimmed) {
+                    return recovered;
+                }
                 serde_json::Value::Object(serde_json::Map::new())
             }
             _ => serde_json::Value::Object(serde_json::Map::new()),
@@ -710,6 +874,14 @@ impl ToolCall {
                         serde_json::Value::String(trimmed.to_string()),
                     );
                     return serde_json::Value::Object(map);
+                }
+                // A truncated object whose *other* fields survived. This is the
+                // common shape for a long `write` body: the path arrived
+                // intact, the content was cut off, and without this the tool
+                // sees an empty object and reports "missing field
+                // `file_path`" for a call that named the file correctly.
+                if let Some(recovered) = try_recover_truncated_object(trimmed) {
+                    return recovered;
                 }
                 // Truncated / partial JSON (e.g. `{`, `{"action":`) or any
                 // other unparseable fragment: return an empty object so the
@@ -959,6 +1131,119 @@ mod tests {
     fn assert_role_text(message: &Message, role: Role, text: &str) {
         assert_eq!(message.role, role);
         assert_eq!(text_of(message), text);
+    }
+
+    /// A long `write` body is the most likely argument in any session to exceed
+    /// the provider's `max_tokens`. The decoder used to hand the tool an empty
+    /// object, which reported "missing field `file_path`" for a call the model
+    /// made correctly, and the model then retried the identical call until the
+    /// repeat guard blocked it.
+    #[test]
+    fn truncated_write_arguments_recover_the_surviving_fields() {
+        let recovered = ToolCall::parse_streamed_input_to_object(
+            r#"{"file_path": "src/main.rs", "content": "fn main() {"#,
+        );
+        assert_eq!(
+            recovered.get("file_path").and_then(|v| v.as_str()),
+            Some("src/main.rs")
+        );
+        // The cut-off string is NOT recovered: a half-written body is worse
+        // than none, and `write` checks the marker before acting.
+        assert!(recovered.get("content").is_none());
+        assert_eq!(
+            recovered
+                .get(TRUNCATED_INPUT_MARKER)
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn complete_pairs_survive_a_truncated_tail() {
+        // Everything before the cut is complete, so all of it is recovered —
+        // including values that are not strings.
+        let recovered = ToolCall::parse_streamed_input_to_object(
+            r#"{"file_path": "a.rs", "content": "ok", "overwrite": true, "count": 7, "tail": "#,
+        );
+        assert_eq!(
+            recovered.get("content").and_then(|v| v.as_str()),
+            Some("ok")
+        );
+        assert_eq!(
+            recovered.get("overwrite").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(recovered.get("count").and_then(|v| v.as_u64()), Some(7));
+    }
+
+    #[test]
+    fn unterminated_trailing_string_is_never_guessed_at() {
+        // `file_path` completed before the cutoff, so it is recovered — which
+        // is what lets `write` name the file it could not finish writing.
+        // `content` never closed, and recovering a prefix of it would hand the
+        // tool a half-written file body, so it is dropped instead.
+        let recovered = ToolCall::parse_streamed_input_to_object(
+            r#"{"file_path": "src/lib.rs", "content": "pub fn truncated() ->"#,
+        );
+        assert_eq!(
+            recovered.get("file_path").and_then(|v| v.as_str()),
+            Some("src/lib.rs")
+        );
+        assert!(
+            recovered.get("content").is_none(),
+            "a truncated string must not be recovered: {recovered}"
+        );
+        assert_eq!(
+            recovered
+                .get(TRUNCATED_INPUT_MARKER)
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn complete_payloads_are_not_marked_as_truncated() {
+        // The marker exists so overwrite-capable tools can tell a salvaged
+        // call from a complete one. A well-formed payload must not carry it,
+        // or `write` would refuse every subsequent write to an existing file.
+        let value =
+            ToolCall::parse_streamed_input_to_object(r#"{"file_path": "a.rs", "content": "done"}"#);
+        assert_eq!(value.get("content").and_then(|v| v.as_str()), Some("done"));
+        assert!(value.get(TRUNCATED_INPUT_MARKER).is_none());
+    }
+
+    #[test]
+    fn nested_keys_do_not_leak_into_the_recovered_object() {
+        // A key inside a recovered array value belongs to that value, not to
+        // the tool's top level.
+        let recovered = ToolCall::parse_streamed_input_to_object(
+            r#"{"todos": [{"content": "a", "status": "pending"}], "note": "#,
+        );
+        assert!(recovered.get("todos").is_some());
+        // The nested `content` must not be lifted to the top level, or `write`
+        // would adopt a todo item's text as the file body.
+        assert!(recovered.get("content").is_none());
+    }
+
+    #[test]
+    fn url_recovery_still_takes_priority_over_generic_recovery() {
+        // The url-specific salvage is more precise, so it must still win.
+        let value = ToolCall::parse_streamed_input_to_object(
+            r#"{"url": "https://example.com/a", "method": "GET"#,
+        );
+        assert_eq!(
+            value.get("url").and_then(|v| v.as_str()),
+            Some("https://example.com/a")
+        );
+    }
+
+    #[test]
+    fn non_object_fragments_still_yield_an_empty_object() {
+        // Never Null: the tool must be able to name the specific missing field.
+        for fragment in ["{", r#"{"action":"#, "not json at all", ""] {
+            let value = ToolCall::parse_streamed_input_to_object(fragment);
+            assert!(value.is_object(), "{fragment:?} produced {value}");
+        }
     }
 
     #[test]

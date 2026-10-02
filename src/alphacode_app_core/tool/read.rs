@@ -5,7 +5,6 @@ use crate::alphacode_app_core::bus::{Bus, BusEvent, FileOp, FileTouch};
 use crate::alphacode_terminal_image::{ImageDisplayParams, ImageProtocol, display_image};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -22,35 +21,52 @@ impl ReadTool {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug)]
 struct ReadInput {
-    #[serde(
-        alias = "path",
-        alias = "file",
-        alias = "filename",
-        alias = "file_name"
-    )]
     file_path: String,
-    #[serde(
-        default,
-        deserialize_with = "super::serde_coerce::opt_usize_from_string_or_number"
-    )]
     start_line: Option<usize>,
-    #[serde(
-        default,
-        deserialize_with = "super::serde_coerce::opt_usize_from_string_or_number"
-    )]
     end_line: Option<usize>,
-    #[serde(
-        default,
-        deserialize_with = "super::serde_coerce::opt_usize_from_string_or_number"
-    )]
     offset: Option<usize>,
-    #[serde(
-        default,
-        deserialize_with = "super::serde_coerce::opt_usize_from_string_or_number"
-    )]
     limit: Option<usize>,
+}
+
+impl ReadInput {
+    /// Read the range fields, accepting a numeric string.
+    ///
+    /// The `deserialize_with` coercers these used to carry handled
+    /// `"timeout": "30"`-style input; they are kept for the same reason, since
+    /// providers that stringify tool arguments are common.
+    fn optional_index(input: &Value, key: &str) -> Option<usize> {
+        let value = input.get(key)?;
+        value
+            .as_u64()
+            .or_else(|| value.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+            .map(|n| n as usize)
+    }
+
+    fn from_value(input: &Value) -> Result<Self> {
+        let file_path = super::coerce_text_arg(
+            input,
+            "read",
+            "file_path",
+            &[
+                "path",
+                "file",
+                "filename",
+                "file_name",
+                "filePath",
+                "filepath",
+                "target",
+            ],
+        )?;
+        Ok(Self {
+            file_path,
+            start_line: Self::optional_index(input, "start_line"),
+            end_line: Self::optional_index(input, "end_line"),
+            offset: Self::optional_index(input, "offset"),
+            limit: Self::optional_index(input, "limit"),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,7 +189,12 @@ impl Tool for ReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let params: ReadInput = serde_json::from_value(input)?;
+        // The path is recovered before the range is normalized, because a bare
+        // string or a truncated payload made `from_value` fail with "missing
+        // field `file_path`" for a call that named the file correctly — and
+        // `read` is the tool a model reaches for to recover, so a failed read
+        // costs the whole turn.
+        let params = ReadInput::from_value(&input)?;
         let range = normalize_read_range(&params)?;
 
         let path = ctx.resolve_path_guarded(Path::new(&params.file_path))?;

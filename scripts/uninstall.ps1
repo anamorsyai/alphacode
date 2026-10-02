@@ -1,5 +1,12 @@
 [CmdletBinding()]
-param([switch]$Purge)
+param(
+    [switch]$Purge,
+    # Remove the bin dir from the user PATH. Defaults to on: install.ps1 -AddPath
+    # adds the entry, so leaving it behind here would leave the user's PATH
+    # pointing at a directory that no longer exists, which shows up later as a
+    # confusing "command not found" for a program that was uninstalled.
+    [switch]$KeepPath
+)
 
 # uninstall.ps1 - remove Alphacode from a Windows machine.
 #
@@ -7,6 +14,7 @@ param([switch]$Purge)
 #   iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.ps1 | iex
 #   .\uninstall.ps1            # local file
 #   .\uninstall.ps1 -Purge     # also remove ~/.local/bin\alphacode.exe
+#   .\uninstall.ps1 -KeepPath  # leave the user PATH entry alone
 #
 # IMPORTANT history (do not regress):
 #   v1.0.22 shipped `$Home = $env:USERPROFILE` near the top. $HOME is a
@@ -29,9 +37,95 @@ param([switch]$Purge)
 # expression") the first time the helper tried to append.
 $script:SkippedPaths = New-Object System.Collections.Generic.List[string]
 
+# --- user PATH removal -------------------------------------------------------
+#
+# Deliberately mirrors install.ps1's rules so the pair cannot disagree:
+#   * HKCU\Environment\Path only. The machine PATH is never touched;
+#   * $env:PATH is never rewritten. Removing the entry from the *session* would
+#     change the behaviour of the very shell the user is running this from, and
+#     the entry is harmless once the directory is gone;
+#   * the raw value is read with DoNotExpandEnvironmentNames and written back
+#     with its original kind, so a PATH using %USERPROFILE%\bin keeps working
+#     instead of being frozen to today's literal path;
+#   * only the exact bin dir is removed -- a sibling directory that merely shares
+#     a prefix (...\alphacode\bin-old) is left alone.
+# Is this Windows?
+#
+# Deliberately NOT `$IsWindows`: that variable only exists in PowerShell 6+, and
+# this script is invoked with `iwr ... | iex`, which runs Windows PowerShell
+# 5.1 on a default Windows machine, where the variable is undefined and every
+# test against it is false.
+function Test-UninstallWindows {
+    [CmdletBinding()]
+    param()
+    return ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT)
+}
+
+function Remove-AlphacodeFromUserPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$BinDir)
+
+    if (-not (Test-UninstallWindows)) {
+        Write-Host "[warn] PATH removal only applies on Windows." -ForegroundColor Yellow
+        return
+    }
+
+    $target = $BinDir.Trim().TrimEnd('\', '/')
+    if ([string]::IsNullOrWhiteSpace($target)) { return }
+
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false)
+    if ($null -eq $key) { return }
+    try {
+        if (-not ($key.GetValueNames() -contains 'Path')) { return }
+        $kind = $key.GetValueKind('Path')
+        $raw = $key.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    } finally {
+        $key.Close()
+    }
+    if ([string]::IsNullOrEmpty($raw)) { return }
+
+    $entries = @($raw -split ';')
+    $kept = @($entries | Where-Object {
+        $_ -eq '' -or ($_.Trim().TrimEnd('\', '/') -ine $target)
+    })
+    if ($kept.Count -eq $entries.Count) { return }   # not present; nothing to do
+
+    $newValue = ($kept -join ';').TrimEnd(';')
+
+    $writable = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    if ($null -eq $writable) {
+        Write-Host "[warn] Could not open HKCU\Environment for writing; PATH left unchanged." -ForegroundColor Yellow
+        return
+    }
+    try {
+        $writable.SetValue('Path', $newValue, $kind)
+    } finally {
+        $writable.Close()
+    }
+
+    try {
+        if (-not ('AlphacodeUninstaller.Native' -as [type])) {
+            Add-Type -Namespace 'AlphacodeUninstaller' -Name 'Native' -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern IntPtr SendMessageTimeout(
+    IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam,
+    uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+        }
+        $result = [UIntPtr]::Zero
+        [void][AlphacodeUninstaller.Native]::SendMessageTimeout(
+            [IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, 'Environment', 0x0002, 5000, [ref]$result)
+    } catch {
+        Write-Host "[warn] Could not broadcast the environment change: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    Write-Host "Removed from your user PATH: $target" -ForegroundColor Cyan
+    Write-Host "    Open a new terminal for this to take effect (this one is unchanged on purpose)."
+}
+
 function Invoke-Uninstall {
     [CmdletBinding()]
-    param([switch]$Purge)
+    param([switch]$Purge, [switch]$KeepPath)
 
     $ErrorActionPreference = 'Continue'
 
@@ -173,6 +267,10 @@ function Invoke-Uninstall {
         if (Remove-IfExists -Path $localBin) { $foundAny = $true }
     }
 
+    if (-not $KeepPath) {
+        Remove-AlphacodeFromUserPath -BinDir $BinDir
+    }
+
     Write-Host ""
     Write-Host "Alphacode has been uninstalled."
 
@@ -190,6 +288,6 @@ function Invoke-Uninstall {
 # Top-level: invoke the function and capture its return code in the host
 # without calling `exit` (which would terminate the user's PowerShell
 # session when this script is run via `iwr ... | iex`).
-$rc = Invoke-Uninstall -Purge:$Purge
+$rc = Invoke-Uninstall -Purge:$Purge -KeepPath:$KeepPath
 $global:LASTEXITCODE = $rc
 return $rc

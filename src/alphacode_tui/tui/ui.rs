@@ -8,6 +8,7 @@
     )
 )]
 
+use super::config_overlay;
 use super::info_widget;
 use super::markdown;
 use super::ui_diff::{
@@ -2649,6 +2650,26 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
 
     if let Some((scroll, content)) = app.model_status_overlay() {
         overlays::draw_model_status_overlay(frame, area, scroll, content);
+        finalize_frame_metrics(
+            app,
+            total_start,
+            Duration::ZERO,
+            total_start.elapsed(),
+            None,
+        );
+        return;
+    }
+
+    if let Some(state) = app.config_overlay() {
+        let settings = config_overlay::settings();
+        let selected = config_overlay::clamp_selection(state.selected, settings.len());
+        overlays::draw_config_overlay(
+            frame,
+            area,
+            &settings,
+            selected,
+            state.notice.as_ref().map(|(text, _)| text.as_str()),
+        );
         finalize_frame_metrics(
             app,
             total_start,

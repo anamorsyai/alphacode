@@ -175,7 +175,7 @@ impl App {
             "changelog" => "/changelog\nShow recent changes embedded in this build.",
             "quit" => "/quit\nExit alphacode.",
             "config" => {
-                "/config\nShow active configuration.\n\n/config init\nCreate default config file.\n\n/config edit\nOpen config in $EDITOR."
+                "/config\nShow active configuration.\n\n/config ui\nOpen the interactive settings overlay (arrows to move, Space/Enter to toggle, Esc to close).\n\n/config init\nCreate default config file.\n\n/config edit\nOpen config in $EDITOR."
             }
             "alignment" => {
                 "/alignment\nShow the current alignment and the saved default.\n\n/alignment centered\nSave centered alignment as the default and apply it immediately.\n\n/alignment left\nSave left-aligned mode as the default and apply it immediately.\n\nPress Alt+C anytime to toggle alignment just for the current session."

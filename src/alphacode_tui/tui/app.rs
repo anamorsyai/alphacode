@@ -1697,6 +1697,8 @@ pub struct App {
     help_scroll: Option<usize>,
     model_status_scroll: Option<usize>,
     model_status_content: String,
+    /// Interactive settings overlay (`/config ui`). None = not visible.
+    config_overlay: Option<super::config_overlay::ConfigOverlayState>,
     /// Session picker overlay (None = not visible)
     session_picker_overlay: Option<RefCell<super::session_picker::SessionPicker>>,
     session_picker_mode: SessionPickerMode,

@@ -44,3 +44,41 @@ demonstrated cross-origin read is the complete finding.
   compound-risk line; do not go find the XSS to justify a higher severity.
 - `Access-Control-Allow-Origin: *` on public, non-credentialed endpoints is
   correct behavior — reject it (Gate 6).
+
+---
+
+## THE COMPOUND RISK — CORS `*` + UNAUTHENTICATED API
+
+`Access-Control-Allow-Origin: *` on its own is *not* a finding when the
+endpoint serves no credentialed data. But it becomes critical when paired
+with another weakness, and this pairing is more common than it should be.
+
+**The pattern:**
+```
+API accepts writes without authentication
+  AND returns Access-Control-Allow-Origin: *
+  → any website on the internet can make authenticated admin calls
+```
+
+This is not a theoretical chain. On a live target, an unauthenticated
+`POST /api/admin/products` that returns `ACAO: *` means a malicious
+website can create, modify, or delete products in every visitor's browser
+session — with the victim's IP, from the victim's network, with no
+credential needed. The CORS header turns a server-side auth failure into
+a client-side exploit that any site can trigger.
+
+**Test for it specifically:**
+```bash
+# After finding an unauthenticated write endpoint, check the CORS header
+curl -s -I -H "Origin: https://attacker.com" \
+  "https://target.com/api/admin/products" | grep -i "access-control"
+```
+
+**If ACAO is `*` (or reflects the origin) on an unauthenticated write
+endpoint, report it as a compound finding.** The base finding is the
+missing auth; the compound risk is that the missing auth is reachable
+from any origin. This is the difference between a Critical that one team
+fixes and a Critical that gets a security advisory.
+
+**Do not build the exploit page.** Report the header combination and the
+endpoint. The owner can reproduce it in one curl command.

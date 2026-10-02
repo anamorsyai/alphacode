@@ -85,6 +85,27 @@ proven finding to raise its severity — see the impact-sufficiency rule in the
 - **Action:** Re-investigate if the context changes.
 - **Example:** "Found XSS in search page, but target deployed WAF that now blocks the payload."
 
+### Damage — the state you hope never to use
+
+- **What:** The assessment itself caused harm. A test artifact was not
+  restored, a production object was modified or deleted, or an action
+  had an unintended side effect.
+- **Evidence:** The before/after state, the restoration attempt and its
+  result, and whether the damage is recoverable.
+- **Action:** Report it. Immediately. Do not hide it, do not let it
+  age into a stale finding, and do not let another finding's severity
+  distract from it. The owner needs to know what happened and whether
+  they need to restore from backup.
+- **Example:** "During write-access testing, sub-category 1 was deleted.
+  The create endpoint for sub-categories was not available, so it could
+  not be recreated. Category 3 was recreated as id 15. Banner 1 is
+  unrecoverable — no create-banner endpoint exists."
+
+**A damage finding is reported alongside, not instead of, the vulnerability
+that enabled it.** Both go in the report. The damage does not invalidate
+the finding — it is evidence of its severity — but it must be stated
+plainly and without softening.
+
 ---
 
 ## 3. FINDING TEMPLATE

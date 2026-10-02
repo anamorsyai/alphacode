@@ -83,15 +83,45 @@ fn onboarding_test_app() -> App {
     app
 }
 
+/// Restores `ALPHACODE_INITIAL_PROVIDER_EXPLICIT` when the test ends.
+///
+/// Constructing an `App` stamps it (provider activation sets it to `"1"`), so a
+/// test that clears it to exercise a first-run path would otherwise leak that
+/// into every test that runs after it — and the tests run in parallel.
+struct ExplicitEnvVarRestore(Option<std::ffi::OsString>);
+
+impl ExplicitEnvVarRestore {
+    fn new(previous: Option<std::ffi::OsString>) -> Self {
+        Self(previous)
+    }
+}
+
+impl Drop for ExplicitEnvVarRestore {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(value) => crate::alphacode_core::env::set_var(
+                "ALPHACODE_INITIAL_PROVIDER_EXPLICIT",
+                value,
+            ),
+            None => crate::alphacode_core::env::remove_var("ALPHACODE_INITIAL_PROVIDER_EXPLICIT"),
+        }
+    }
+}
+
 #[test]
 fn onboarding_strongest_model_only_runs_without_explicit_defaults() {
     with_temp_alphacode_home(|| {
         let previous_explicit = std::env::var_os("ALPHACODE_INITIAL_PROVIDER_EXPLICIT");
         crate::alphacode_core::env::remove_var("ALPHACODE_INITIAL_PROVIDER_EXPLICIT");
 
-        // `ProviderConfig::default` now ships a default model and provider, so
-        // "no explicit defaults" has to be established explicitly rather than
-        // assumed from an untouched config file.
+        // `ProviderConfig::default` ships a default model and provider, and
+        // `#[serde(default)]` restores them for any key the file omits, so
+        // "no explicit defaults" has to be established explicitly. That this
+        // has to be done at all is the bug: `save` drops a `None` field, so
+        // the cleared default cannot survive a load, and the check under test
+        // could only ever see the shipped default. It now reads the raw file
+        // (`Config::has_explicit_provider_defaults`), where "absent" is still
+        // distinct from "set".
         let mut baseline = crate::config::Config::load();
         baseline.provider.default_model = None;
         baseline.provider.default_provider = None;
@@ -1430,6 +1460,53 @@ fn import_continue_reaches_ready_quality_first_openai_model() {
         // App construction performs synchronous runtime-backed setup, so build
         // it before entering the async test runtime to avoid nested `block_on`.
         let mut app = quality_first_openai_test_app();
+
+        // Constructing the app activates a provider, which stamps
+        // ALPHACODE_INITIAL_PROVIDER_EXPLICIT — i.e. "the initial provider was
+        // chosen explicitly". That is the exact opposite of the state this test
+        // asserts about: it is the first-run path where the user has chosen
+        // nothing and onboarding should pick the globally strongest model. Clear
+        // it *after* construction (construction re-stamps it) and restore it
+        // afterwards so the next test does not inherit it.
+        let previous_explicit = std::env::var_os("ALPHACODE_INITIAL_PROVIDER_EXPLICIT");
+        crate::alphacode_core::env::remove_var("ALPHACODE_INITIAL_PROVIDER_EXPLICIT");
+        let _restore_explicit = ExplicitEnvVarRestore::new(previous_explicit);
+
+        // The other half of the same precondition, and the half that actually
+        // broke. A fresh `ALPHACODE_HOME` has no `config.toml`, so
+        // `Config::load()` falls back to `ProviderConfig::default` — which
+        // *ships* `default_model`/`default_provider` — and any `save()` in the
+        // flow writes that fallback out in full. The file then literally
+        // contains
+        //
+        //     [provider]
+        //     default_model = "kilo-auto/free"
+        //     default_provider = "alphax-free"
+        //
+        // and `Config::has_explicit_provider_defaults`, which reads the raw
+        // document precisely so that "absent" stays distinct from "set", says
+        // the user chose them. They did not: nobody has picked a default yet,
+        // which is the whole point of the first-run path under test.
+        //
+        // This was ordering-dependent, so it only showed up under parallel
+        // execution, where the config-save path runs at a different point in
+        // the flow than it does when the test runs alone.
+        //
+        // Clearing them explicitly is the same thing the sibling test
+        // `onboarding_strongest_model_only_runs_without_explicit_defaults` does
+        // to establish its baseline. `save` drops a `None` field (TOML has no
+        // null), so afterwards the keys are genuinely absent from the file.
+        let mut first_run_config = crate::config::Config::load();
+        first_run_config.provider.default_model = None;
+        first_run_config.provider.default_provider = None;
+        first_run_config
+            .save()
+            .expect("clear default model/provider defaults for the first-run path");
+        assert!(
+            !crate::config::Config::has_explicit_provider_defaults(),
+            "the first-run config must not name a default the user never chose"
+        );
+
         let runtime = tokio::runtime::Runtime::new().expect("test runtime");
         runtime.block_on(async {
             app.onboarding_flow = None;
@@ -1467,9 +1544,29 @@ fn import_continue_reaches_ready_quality_first_openai_model() {
                 "the login event reports the coarse auth-channel label; the \
                  concrete route is asserted on ProviderModelActivated below"
             );
+            // Every input this decision reads is process-global, and provider activation
+            // writes two of them from *production* code
+            // (`alphacode_base::provider::activation`), which no test lock
+            // covers. `with_temp_alphacode_home` serializes `ALPHACODE_HOME`
+            // but not these, so a concurrent test that activates a provider can
+            // move one of them mid-assertion. Name all of them so a failure says
+            // which moved instead of leaving it to be bisected.
+            let explicit_defaults_on_disk =
+                crate::config::Config::has_explicit_provider_defaults();
+            let explicit_defaults_raw = std::fs::read_to_string(
+                crate::config::Config::path().unwrap_or_default(),
+            )
+            .unwrap_or_default();
+            let runtime_flag = std::env::var("ALPHACODE_INITIAL_PROVIDER_EXPLICIT").ok();
+            let model_env = std::env::var("ALPHACODE_MODEL").ok();
+            let provider_env = std::env::var("ALPHACODE_PROVIDER").ok();
             assert!(
                 app.onboarding_should_prefer_strongest_model(),
-                "first-run import without explicit defaults should use global ranking"
+                "first-run import without explicit defaults should use global ranking \
+                 (config_has_explicit_defaults={explicit_defaults_on_disk}, \
+                 ALPHACODE_INITIAL_PROVIDER_EXPLICIT={runtime_flag:?}, \
+                 ALPHACODE_MODEL={model_env:?}, ALPHACODE_PROVIDER={provider_env:?}, \
+                 config_on_disk={explicit_defaults_raw:?})"
             );
 
             app.handle_login_completed(login);

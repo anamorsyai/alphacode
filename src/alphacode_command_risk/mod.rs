@@ -42,6 +42,12 @@ mod tokenize;
 #[cfg(test)]
 #[path = "bypass_tests.rs"]
 mod bypass_tests;
+// The other half of the contract: a gate that denies ordinary work is as broken
+// as one that admits destructive work, and a `Catastrophic` verdict cannot be
+// justified past.
+#[cfg(test)]
+#[path = "false_positive_tests.rs"]
+mod false_positive_tests;
 
 pub use gate::{GateOutcome, Justification, gate};
 pub use paths::{ProtectedPaths, is_catastrophic_target};
@@ -537,7 +543,35 @@ fn assess_segment(tokens: &[Token], ctx: &RiskContext, findings: &mut Vec<RiskFi
     // destructive verb behind it. Rather than trying to model every wrapper's
     // flag grammar, scan the whole segment for a known destructive verb; if one
     // is present the segment is unsafe no matter what we think runs first.
-    if !is_destructive && !is_shell_program(&program_name) {
+    //
+    // Two exclusions keep this from denying ordinary work. Before, *any*
+    // occurrence of a shell name anywhere in the segment was Catastrophic, so
+    // `grep -rn "sh" src/`, `git commit -m "fix the sh wrapper"` and
+    // `echo "run bash later"` were all hard-denied -- and Catastrophic is
+    // explicitly "no amount of model justification can unlock it", so the agent
+    // had no way forward. Measured on one session that denied 6 of 7 ordinary
+    // commands purely for *mentioning* a shell:
+    //
+    //   * A word that was quoted in the original command is data, not code. A
+    //     shell name in a grep pattern, a commit message or an echo body is
+    //     never executed. `docker run img sh -c "rm -rf ~"` still fires: the
+    //     `sh` there is its own unquoted token, and the quoted part is the
+    //     script, which the program-position branch below assesses directly.
+    //   * A program that only reads cannot execute anything, so its arguments
+    //     are inert by construction -- as long as it is not in one of its
+    //     destructive forms. `find -exec sh -c "..."` is exactly why `find`
+    //     needs the conditional-flag carve-out.
+    let conditional_flags_now = CONDITIONALLY_DESTRUCTIVE
+        .iter()
+        .find(|(name, _)| *name == program_name)
+        .map(|(_, flags)| *flags);
+    let in_destructive_form = conditional_flags_now
+        .is_some_and(|flags| tokens.iter().any(|t| flags.contains(&t.text.as_str())));
+    let program_is_inert = !in_destructive_form
+        && READ_ONLY_COMMANDS.contains(&program_name.as_str())
+        && !is_shell_program(&program_name);
+
+    if !is_destructive && !is_shell_program(&program_name) && !program_is_inert {
         let hidden = tokens.iter().find_map(|t| {
             // A quoted argument can itself be a whole command string
             // (`su - root -c "rm -rf ~"`), so the scan has to look *inside*
@@ -546,7 +580,12 @@ fn assess_segment(tokens: &[Token], ctx: &RiskContext, findings: &mut Vec<RiskFi
             words.push(t.basename());
             for name in words {
                 let name = name.rsplit(['/', '\\']).next().unwrap_or(&name).to_string();
-                if is_destructive_name(&name) || SHELL_COMMANDS.contains(&name.as_str()) {
+                let is_destructive_word = is_destructive_name(&name);
+                let is_shell_word = SHELL_COMMANDS.contains(&name.as_str());
+                // Quoted text is inert data unless the word *itself* is the
+                // quoted shell invocation, which the token's basename still
+                // shows: `"sh" -c "..."` on a system that quotes the program.
+                if is_destructive_word || (is_shell_word && !t.was_quoted) {
                     return Some(name);
                 }
             }

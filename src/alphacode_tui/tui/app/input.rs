@@ -2536,6 +2536,20 @@ pub(super) fn handle_modal_key(
         return Ok(true);
     }
 
+    if app.config_overlay.is_some() {
+        // Ctrl chords stay global while the overlay is up. The overlay claims
+        // only a handful of keys and swallows everything else, so without this
+        // Ctrl+C could not interrupt or quit and Ctrl+R could not open the
+        // history search — the user would have to discover Esc first to escape.
+        if modifiers.contains(KeyModifiers::CONTROL)
+            && handle_global_control_shortcuts(app, code, app.diagram_available())
+        {
+            return Ok(true);
+        }
+        app.handle_config_overlay_key(code);
+        return Ok(true);
+    }
+
     if app.session_picker_overlay.is_some() {
         app.handle_session_picker_key(code, modifiers)?;
         return Ok(true);

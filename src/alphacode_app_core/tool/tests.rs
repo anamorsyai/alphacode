@@ -6,6 +6,123 @@ use crate::alphacode_app_core::provider::{EventStream, Provider};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+/// The bug that prompted this ladder: a bare `from_value` rejected every
+/// argument shape a model actually produces, and the resulting
+/// "missing field `url`" cost a whole turn.
+#[test]
+fn coerce_url_arg_recovers_the_shapes_models_emit() {
+    let coerce = |v: Value| coerce_url_arg(&v, "webfetch").unwrap();
+
+    // Documented key.
+    assert_eq!(
+        coerce(json!({"url": "https://example.com/a"})),
+        "https://example.com/a"
+    );
+    // Aliases, in the casing models actually use.
+    for key in ["uri", "target", "href", "link", "URL", "Target"] {
+        assert_eq!(
+            coerce(json!({ key: "https://example.com/x" })),
+            "https://example.com/x",
+            "alias {key} was not recovered"
+        );
+    }
+    // A key outside the alias list still resolves when its value is a URL.
+    assert_eq!(
+        coerce(json!({"full_link": "https://example.com/y"})),
+        "https://example.com/y"
+    );
+    // Bare URL string where an object was expected.
+    assert_eq!(
+        coerce(Value::String("https://example.com/b".into())),
+        "https://example.com/b"
+    );
+    // Single-element array wrapper.
+    assert_eq!(
+        coerce(json!([{"url": "https://example.com/c"}])),
+        "https://example.com/c"
+    );
+    // Quoting characters models add when echoing a URL back from context.
+    assert_eq!(
+        coerce(json!({"url": "  `https://example.com/d` "})),
+        "https://example.com/d"
+    );
+}
+
+#[test]
+fn coerce_url_arg_reports_an_actionable_error() {
+    let err = coerce_url_arg(&json!({}), "webfetch")
+        .unwrap_err()
+        .to_string();
+    // The `missing field` wording keeps the repeat guard from counting a
+    // malformed call as an execution failure.
+    assert!(err.contains("missing field `url`"), "{err}");
+    // The error must show the whole contract, not one field at a time.
+    assert!(err.contains("https://example.com"), "{err}");
+
+    let wrong_key = coerce_url_arg(&json!({"adress": "example.com"}), "webfetch")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        wrong_key.contains("`adress`"),
+        "keys not listed: {wrong_key}"
+    );
+
+    // A non-string value cannot be a target.
+    assert!(coerce_url_arg(&json!({"url": 42}), "webfetch").is_err());
+    assert!(coerce_url_arg(&Value::Null, "webfetch").is_err());
+}
+
+/// A value that merely *contains* a URL must not be mistaken for one: `url`
+/// is accepted verbatim, but an alias is only honoured when it really is an
+/// http(s) target, or a `path` field would be fetched as a URL.
+#[test]
+fn coerce_url_arg_does_not_treat_arbitrary_strings_as_targets() {
+    assert!(coerce_url_arg(&json!({"path": "/api/v1/users"}), "webfetch").is_err());
+    assert!(coerce_url_arg(&json!({"host": "example.com"}), "webfetch").is_err());
+}
+
+#[test]
+fn coerce_host_arg_recovers_bare_hosts() {
+    let coerce = |v: Value| coerce_host_arg(&v, "nmap", "target").unwrap();
+    // Documented key.
+    assert_eq!(coerce(json!({"target": "example.com"})), "example.com");
+    // Aliases, including the ones specific to recon tools.
+    for key in ["host", "domain", "ip", "t", "d", "hostname"] {
+        assert_eq!(
+            coerce(json!({ key: "example.com" })),
+            "example.com",
+            "alias {key} was not recovered"
+        );
+    }
+    // A scheme is unwrapped: these tools take a host, and `validate_hostname`
+    // rejects both the colon and the path.
+    assert_eq!(
+        coerce(json!({"target": "https://example.com/admin"})),
+        "example.com"
+    );
+    // Bare string and array wrapper.
+    assert_eq!(coerce(Value::String("10.0.0.1".into())), "10.0.0.1");
+    assert_eq!(
+        coerce(json!([{"host": "example.com:8443"}])),
+        "example.com:8443"
+    );
+    // Wildcards are legitimate recon input.
+    assert_eq!(coerce(json!({"target": "*.example.com"})), "*.example.com");
+}
+
+#[test]
+fn coerce_host_arg_rejects_non_hosts() {
+    // A bare word with no dot, port or wildcard is not a host.
+    assert!(coerce_host_arg(&json!({"target": "localhost"}), "nmap", "target").is_err());
+    assert!(coerce_host_arg(&json!({}), "nmap", "target").is_err());
+    let err = coerce_host_arg(&json!({}), "nmap", "target")
+        .unwrap_err()
+        .to_string();
+    // The whole contract is stated at once, not one field per retry.
+    assert!(err.contains("missing field `target`"), "{err}");
+    assert!(err.contains("nmap"), "{err}");
+}
+
 struct MockProvider;
 
 #[async_trait]
@@ -63,6 +180,103 @@ fn empty_arguments_are_described_actionably() {
 
     let null = super::describe_received_arguments(&Value::Null);
     assert!(null.contains("null"), "{null}");
+}
+
+/// End-to-end proof that the reported symptom is fixed: the same malformed
+/// `write` — empty argument object — used to fail forever, because a validation
+/// error called `clear_failure` and therefore erased its own streak.
+///
+/// This drives the real `Registry::execute`, not the guard in isolation, because
+/// the bug was in the wiring: the guard was capable of refusing the call, it was
+/// just never told about the failure.
+#[tokio::test]
+async fn an_identical_malformed_call_eventually_stops_repeating() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = format!("test-malformed-loop-{}", std::process::id());
+    let ctx = |session: &str| ToolContext {
+        session_id: session.to_string(),
+        message_id: "message".to_string(),
+        tool_call_id: "tool".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let mut saw_refusal = false;
+    let mut dispatched = 0usize;
+    // More attempts than any limit allows: the loop must become bounded well
+    // before this runs out.
+    for _ in 0..(super::repeat_guard::MALFORMED_CALL_LIMIT + 4) {
+        match registry.execute("write", json!({}), ctx(&session)).await {
+            Err(error) => {
+                let message = error.to_string();
+                if message.contains("Refusing to run `write` again") {
+                    saw_refusal = true;
+                    break;
+                }
+                // An ordinary "missing field" rejection: the tool ran and said
+                // no, which is the expected first-N behaviour.
+                assert!(
+                    message.contains("missing field `file_path`"),
+                    "unexpected error: {message}"
+                );
+            }
+            Ok(_) => panic!("an empty write must never succeed"),
+        }
+        dispatched += 1;
+    }
+
+    assert!(
+        saw_refusal,
+        "the identical malformed call was never refused after {dispatched} attempts"
+    );
+    assert!(
+        dispatched <= super::repeat_guard::MALFORMED_CALL_LIMIT as usize,
+        "took {dispatched} attempts to stop the loop; the limit is {}",
+        super::repeat_guard::MALFORMED_CALL_LIMIT
+    );
+    clear_session_tool_policy(&session);
+}
+
+/// A model that fixes the call must still get through, and must not need any
+/// explicit forgiveness -- a corrected call has a different input and so a
+/// different streak.
+#[tokio::test]
+async fn a_corrected_malformed_call_is_still_dispatched() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let session = format!("test-malformed-fix-{}", std::process::id());
+    let ctx = || ToolContext {
+        session_id: session.clone(),
+        message_id: "message".to_string(),
+        tool_call_id: "tool".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    // Burn through the whole malformed allowance on a call that cannot work.
+    for _ in 0..super::repeat_guard::MALFORMED_CALL_LIMIT {
+        assert!(registry.execute("write", json!({}), ctx()).await.is_err());
+    }
+
+    // Now the corrected shape. It must be dispatched -- i.e. produce a
+    // *different* error rather than the guard's refusal.
+    if let Err(error) = registry
+        .execute("bash", json!({"command": "echo ok"}), ctx())
+        .await
+    {
+        let message = error.to_string();
+        assert!(
+            !message.contains("Refusing to run `write` again")
+                && !message.contains("Refusing to run `bash` again"),
+            "the corrected call was refused by the loop guard: {message}"
+        );
+    }
+    clear_session_tool_policy(&session);
 }
 
 #[test]

@@ -806,6 +806,78 @@ mod utf8_truncation_tests {
         assert!(error.to_string().contains("non-empty `command`"));
     }
 
+    /// Recovering `command` from a loosely-shaped payload.
+    ///
+    /// These are the shapes a model actually emits, and each one used to fail
+    /// with the same unhelpful "missing field `command`" even though a usable
+    /// command was right there.
+    #[test]
+    fn command_is_recovered_from_loosely_shaped_payloads() {
+        // The aliases the schema already advertises.
+        assert_eq!(
+            super::super::coerce_command_field(&json!({"cmd": "ls -la"}), "bash").unwrap(),
+            "ls -la"
+        );
+        assert_eq!(
+            super::super::coerce_command_field(&json!({"shell": "ls -la"}), "bash").unwrap(),
+            "ls -la"
+        );
+        // A capitalised key. The old alias scan was case-sensitive.
+        assert_eq!(
+            super::super::coerce_command_field(&json!({"Command": "ls -la"}), "bash").unwrap(),
+            "ls -la"
+        );
+        // A bare string payload.
+        assert_eq!(
+            super::super::coerce_command_field(&json!("ls -la"), "bash").unwrap(),
+            "ls -la"
+        );
+        // The documented key still wins over an alias.
+        assert_eq!(
+            super::super::coerce_command_field(&json!({"command": "real", "cmd": "alias"}), "bash")
+                .unwrap(),
+            "real"
+        );
+    }
+
+    /// The single-string fallback that `coerce_text_arg` allows would be
+    /// actively dangerous here, because `BashInput` has other string fields.
+    ///
+    /// Executing `intent` or `justification` as a shell line is how a
+    /// description of what to do turns into a command that does it.
+    #[test]
+    fn descriptive_fields_are_never_executed_as_the_command() {
+        for payload in [
+            json!({"intent": "clean up the tmp directory"}),
+            json!({"justification": "the user asked for a cleanup"}),
+            json!({"intent": "list files"}),
+        ] {
+            let error = super::super::coerce_command_field(&payload, "bash")
+                .expect_err("a descriptive field must not become the command");
+            assert!(
+                error.to_string().contains("missing field `command`"),
+                "unexpected error for {payload}: {error}"
+            );
+        }
+    }
+
+    /// An empty argument object is unrecoverable — but the error must still be
+    /// actionable and command-shaped rather than pointing at a file path.
+    #[test]
+    fn a_truly_empty_call_gets_a_command_shaped_error() {
+        let error = super::super::coerce_command_field(&json!({}), "bash").unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("missing field `command`"), "{message}");
+        assert!(
+            message.contains("ls -la"),
+            "the fix-it line must show a command: {message}"
+        );
+        assert!(
+            !message.contains("/path/to/file"),
+            "a file-path example is wrong for bash: {message}"
+        );
+    }
+
     #[test]
     fn format_command_output_truncates_on_utf8_boundary() {
         let input = format!("{}é", "a".repeat(29_999));
@@ -1007,28 +1079,26 @@ impl Tool for BashTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        // Alias-tolerant parse first: models often send `cmd`/`script`.
-        // Falls back to a key-listing error so the retry can actually fix it.
+        // Alias-tolerant recovery first: models routinely send `cmd`/`script`,
+        // capitalise the key, or emit the command as a bare string. Anything
+        // else falls through to a key-listing error the retry can act on.
+        //
+        // `coerce_command_field` deliberately has no "the only string field must
+        // be the command" fallback. `BashInput` also carries `intent` and
+        // `justification`, and adopting either as the command would execute
+        // descriptive text as a shell line — `{"intent": "clean the tmp dir"}`
+        // would run `clean the tmp dir`. Only the documented key, its aliases
+        // and an explicitly-shaped payload are accepted.
         let mut params: BashInput = match serde_json::from_value(input.clone()) {
             Ok(params) => params,
             Err(_) => {
-                let obj = input.as_object().ok_or_else(|| {
-                    anyhow::anyhow!(
+                if !input.is_object() {
+                    return Err(anyhow::anyhow!(
                         "bash expects a JSON object with `command`, e.g. \
                          {{\"command\": \"ls -la\"}}"
-                    )
-                })?;
-                let command = ["command", "cmd", "commands", "script", "shell"]
-                    .iter()
-                    .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "missing field `command`. {}. \
-                             Provide the shell command as `command`, e.g. \
-                             {{\"command\": \"ls -la\"}}",
-                            super::describe_received_arguments(&input)
-                        )
-                    })?;
+                    ));
+                }
+                let command = super::coerce_command_field(&input, "bash")?;
                 let mut value = input.clone();
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert(

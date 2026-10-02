@@ -124,25 +124,10 @@ fn normalize_subfinder_input(input: &Value) -> Result<SubfinderInput> {
     if let Ok(params) = serde_json::from_value::<SubfinderInput>(input.clone()) {
         return Ok(params);
     }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "subfinder expects a JSON object with `domain`, e.g. \
-             {{\"domain\": \"example.com\"}}"
-        )
-    })?;
-    let domain = ["domain", "target", "host", "domain_name", "d"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "missing field `domain`. {}. \
-                 Provide the base domain as `domain`, e.g. \
-                 {{\"domain\": \"example.com\"}}",
-                super::describe_received_arguments(input)
-            )
-        })?;
+    let domain = super::coerce_host_arg(input, "subfinder", "domain")?;
+    // Remaining options are optional; a payload that was a bare host string has
+    // no object to read them from, so an empty map stands in for the defaults.
+    let obj = input.as_object().cloned().unwrap_or_default();
     Ok(SubfinderInput {
         domain: domain.to_string(),
         all: obj.get("all").and_then(|v| v.as_bool()).unwrap_or(false),

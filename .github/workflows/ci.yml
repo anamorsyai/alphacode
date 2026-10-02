@@ -154,7 +154,7 @@ jobs:
     name: installer smoke
     runs-on: ubuntu-latest
     needs: build
-      # Sanity-check the install scripts' bash syntax without actually
+      # Sanity-check the install scripts' syntax without actually
       # downloading a release (we don't have one in CI).
     steps:
       - uses: actions/checkout@v4
@@ -162,8 +162,53 @@ jobs:
         run: bash -n scripts/install.sh
       - name: bash -n scripts/uninstall.sh
         run: bash -n scripts/uninstall.sh
-      - name: pwsh syntax check on scripts/install.ps1
+      - name: pwsh parse check on the PowerShell scripts
         shell: pwsh
-        run: >-
-          $null = [System.Management.Automation.PSParser]::Tokenize(
-          (Get-Content -Raw scripts/install.ps1), [ref]$null)
+        run: |
+          # Parse, do not tokenize. PSParser::Tokenize only splits text into
+          # tokens and never checks that they form a valid script, so it passes
+          # on files that cannot actually run.
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem -Path scripts -Recurse -Filter '*.ps1'
+          if ($files.Count -eq 0) { throw 'no .ps1 scripts found' }
+          foreach ($f in $files) {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $f.FullName, [ref]$null, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              foreach ($e in $errors) { Write-Host "::error file=$($f.FullName):: $($e.Message)" }
+              throw "parse errors in $($f.Name)"
+            }
+          }
+          Write-Host "parsed $($files.Count) PowerShell script(s)"
+
+      - name: PowerShell scripts are ASCII-only
+        shell: pwsh
+        run: |
+          # install.ps1 is distributed as `iwr ... | iex` and is routinely run by
+          # Windows PowerShell 5.1, which decodes a BOM-less file as the
+          # ANSI code page. In CP1252 the byte 0x94 is a right double quote, so a
+          # UTF-8 em dash (E2 80 94) decodes to mojibake *plus a closing quote*
+          # and silently truncates the surrounding string into a syntax error.
+          # install.ps1 already carried one em dash and CI's Tokenize check
+          # could not have caught it. Keep these files ASCII.
+          $ErrorActionPreference = 'Stop'
+          $bad = @()
+          foreach ($f in Get-ChildItem -Path scripts -Recurse -Filter '*.ps1') {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+              if ($bytes[$i] -gt 127) {
+                $bad += "$($f.Name) at byte offset $i"
+                break
+              }
+            }
+          }
+          if ($bad.Count -gt 0) {
+            foreach ($b in $bad) { Write-Host "::error::$b contains non-ASCII bytes" }
+            throw 'PowerShell scripts must be ASCII-only (or given a UTF-8 BOM)'
+          }
+          Write-Host 'all PowerShell scripts are ASCII-only'
+
+      - name: installer PATH logic tests
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/tests/install-path.tests.ps1

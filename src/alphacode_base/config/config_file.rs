@@ -145,6 +145,50 @@ impl Config {
         super::invalidate_config_cache();
     }
 
+    /// Whether `config.toml` (or the environment) *explicitly* names a default
+    /// provider or model, as opposed to the value merely falling back to
+    /// `ProviderConfig::default`.
+    ///
+    /// The parsed `Config` cannot answer this question. `ProviderConfig::default`
+    /// ships `default_model`/`default_provider`, `#[serde(default)]` on the
+    /// struct re-injects them for every key the file omits, and `save` drops a
+    /// `None` field entirely (TOML has no null). So a config where the user
+    /// deliberately cleared the default round-trips back to
+    /// `Some("kilo-auto/free")` on the next load, and every "did the user pick
+    /// this?" check reads the shipped default as a deliberate choice.
+    ///
+    /// The raw document is the only place where "absent" is still distinct from
+    /// "set", so this reads the file rather than the parsed struct. An
+    /// unparseable or missing file reports `false`: there is no evidence of an
+    /// explicit choice.
+    pub fn has_explicit_provider_defaults() -> bool {
+        // Env overrides are applied after the parse, so they are checked
+        // separately and count as explicit on their own.
+        if std::env::var("ALPHACODE_MODEL").is_ok_and(|v| !v.trim().is_empty())
+            || std::env::var("ALPHACODE_PROVIDER").is_ok_and(|v| !v.trim().is_empty())
+        {
+            return true;
+        }
+        let Some(path) = Self::path() else {
+            return false;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return false;
+        };
+        let Ok(doc) = content.parse::<toml::Value>() else {
+            return false;
+        };
+        let Some(provider) = doc.get("provider").and_then(toml::Value::as_table) else {
+            return false;
+        };
+        ["default_model", "default_provider"].iter().any(|key| {
+            provider
+                .get(*key)
+                .and_then(toml::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+    }
+
     /// Update the copilot premium mode in the config file.
     /// Reloads, patches, and saves so it doesn't clobber other fields.
     pub fn set_copilot_premium(mode: Option<&str>) -> anyhow::Result<()> {
@@ -760,5 +804,188 @@ impl Config {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_temp_home<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::storage::lock_test_env();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let previous = std::env::var_os("ALPHACODE_HOME");
+        let previous_model = std::env::var_os("ALPHACODE_MODEL");
+        let previous_provider = std::env::var_os("ALPHACODE_PROVIDER");
+        crate::alphacode_core::env::set_var("ALPHACODE_HOME", dir.path());
+        crate::alphacode_core::env::remove_var("ALPHACODE_MODEL");
+        crate::alphacode_core::env::remove_var("ALPHACODE_PROVIDER");
+        let result = f();
+        restore("ALPHACODE_HOME", previous);
+        restore("ALPHACODE_MODEL", previous_model);
+        restore("ALPHACODE_PROVIDER", previous_provider);
+        result
+    }
+
+    fn restore(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => crate::alphacode_core::env::set_var(key, value),
+            None => crate::alphacode_core::env::remove_var(key),
+        }
+    }
+
+    fn write_config(contents: &str) {
+        let path = Config::path().expect("config path");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&path, contents).expect("write config");
+    }
+
+    /// The whole point of the raw-file read: a config with *no* default
+    /// must not read as an explicit one, even though
+    /// `ProviderConfig::default` ships `default_model`/`default_provider`
+    /// and `#[serde(default)]` puts them back for every omitted key.
+    #[test]
+    fn a_config_without_a_default_is_not_an_explicit_choice() {
+        with_temp_home(|| {
+            write_config("[display]\ncompact_notifications = false\n");
+            assert!(
+                !Config::has_explicit_provider_defaults(),
+                "an omitted default must not read as explicit"
+            );
+            // And the parsed value is the shipped default, which is exactly
+            // what made the parsed-config check wrong.
+            assert_eq!(
+                Config::load().provider.default_model,
+                ProviderConfig::default().default_model,
+            );
+        });
+    }
+
+    #[test]
+    fn a_written_default_is_an_explicit_choice() {
+        with_temp_home(|| {
+            write_config("[provider]\ndefault_model = \"claude-opus-5\"\n");
+            assert!(Config::has_explicit_provider_defaults());
+
+            write_config("[provider]\ndefault_provider = \"openai\"\n");
+            assert!(Config::has_explicit_provider_defaults());
+
+            // Either key alone is enough: a user who pinned only the model
+            // still made a choice.
+            write_config("[provider]\ndefault_model = \"\"\n");
+            assert!(
+                !Config::has_explicit_provider_defaults(),
+                "an empty value is not a choice"
+            );
+        });
+    }
+
+    /// A missing or malformed file has no evidence of a choice. Reporting
+    /// `true` there would make onboarding treat a broken install as a
+    /// fully-configured one.
+    #[test]
+    fn a_missing_or_malformed_config_is_not_explicit() {
+        with_temp_home(|| {
+            assert!(!Config::has_explicit_provider_defaults());
+            write_config("this is not = = toml");
+            assert!(!Config::has_explicit_provider_defaults());
+        });
+    }
+
+    /// Env overrides are applied after the parse, so they have to be
+    /// checked separately or `ALPHACODE_MODEL=...` would read as a fresh
+    /// install with no model chosen.
+    #[test]
+    fn env_overrides_count_as_explicit() {
+        with_temp_home(|| {
+            write_config("[display]\ncompact_notifications = false\n");
+            crate::alphacode_core::env::set_var("ALPHACODE_MODEL", "gpt-5.1");
+            assert!(Config::has_explicit_provider_defaults());
+            crate::alphacode_core::env::remove_var("ALPHACODE_MODEL");
+            crate::alphacode_core::env::set_var("ALPHACODE_PROVIDER", "openai");
+            assert!(Config::has_explicit_provider_defaults());
+            crate::alphacode_core::env::remove_var("ALPHACODE_PROVIDER");
+            assert!(!Config::has_explicit_provider_defaults());
+        });
+    }
+
+    /// A round-trip through `save` must not manufacture an explicit
+    /// default. `save` drops a `None` field (TOML has no null), so the
+    /// file after clearing the default is exactly the file before it.
+    #[test]
+    fn clearing_the_default_survives_a_save() {
+        with_temp_home(|| {
+            let mut cfg = Config::default();
+            cfg.provider.default_model = None;
+            cfg.provider.default_provider = None;
+            cfg.save().expect("save");
+            assert!(
+                !Config::has_explicit_provider_defaults(),
+                "clearing the default must survive the save/load round-trip"
+            );
+        });
+    }
+
+    /// The regression this change could plausibly have caused: a `save` that
+    /// *fails* is reported through the setters' `Result`, which the command
+    /// layer handles rather than propagates, so the preference is silently not
+    /// persisted and the next load reads the fallback. That is silent, so it is
+    /// pinned here directly.
+    #[test]
+    fn saving_the_default_config_round_trips_every_provider_field() {
+        with_temp_home(|| {
+            let mut cfg = Config::default();
+            cfg.provider.openai_service_tier = Some("priority".to_string());
+            cfg.save()
+                .expect("save must succeed for a default-shaped config");
+
+            let reloaded = Config::load();
+            assert_eq!(
+                reloaded.provider.openai_service_tier.as_deref(),
+                Some("priority"),
+                "a field unrelated to the default must survive the round-trip"
+            );
+            assert_eq!(
+                reloaded.provider.openai_reasoning_effort.as_deref(),
+                Some("medium"),
+                "the shipped fallback is re-applied by the loader"
+            );
+        });
+    }
+
+    /// A value the user actually chose is written even when it happens to match
+    /// the shipped default — and, more importantly, a value that does *not*
+    /// match it is written too. Without this the "is it explicit?" question
+    /// would silently change answer for every non-default selection.
+    #[test]
+    fn a_chosen_default_is_still_written() {
+        with_temp_home(|| {
+            let mut cfg = Config::default();
+            cfg.provider.default_model = Some("claude-fable-5".to_string());
+            cfg.provider.default_provider = Some("openai".to_string());
+            cfg.save().expect("save");
+            assert!(Config::has_explicit_provider_defaults());
+            let raw = std::fs::read_to_string(Config::path().expect("path")).expect("read");
+            assert!(raw.contains("claude-fable-5"), "{raw}");
+            assert!(raw.contains("openai"), "{raw}");
+        });
+    }
+
+    /// A fresh install must not gain an explicit default just because something
+    /// else in the config was saved. This is the exact production sequence that
+    /// broke the first-run import: the import writes the trusted-login entry,
+    /// `save` rewrites the whole document, and the shipped model/provider
+    /// defaults came out the other side looking like a deliberate choice.
+    #[test]
+    fn saving_anything_else_does_not_manufacture_a_default() {
+        with_temp_home(|| {
+            let mut cfg = Config::default();
+            cfg.auth.trusted_external_sources = vec!["openai_codex_auth_json".to_string()];
+            cfg.save().expect("save");
+            assert!(
+                !Config::has_explicit_provider_defaults(),
+                "an unrelated save must not write the shipped default as an explicit choice"
+            );
+        });
     }
 }

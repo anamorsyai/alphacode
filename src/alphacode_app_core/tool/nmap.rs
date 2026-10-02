@@ -187,19 +187,12 @@ fn normalize_nmap_input(input: &Value) -> Result<NmapInput> {
     if let Ok(params) = serde_json::from_value::<NmapInput>(input.clone()) {
         return Ok(params);
     }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "nmap expects a JSON object with `target`, e.g. {{\"target\": \"example.com\"}}"
-        )
-    })?;
-    let target = ["target", "host", "ip", "t"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("missing field `target`. Provide the target host as `target`.")
-        })?;
+    // Aliases, bare-host strings and truncated payloads all resolve through the
+    // shared coercion ladder.
+    let target = super::coerce_host_arg(input, "nmap", "target")?;
+    // Remaining options are optional; a payload that was a bare host string has
+    // no object to read them from, so an empty map stands in for the defaults.
+    let obj = input.as_object().cloned().unwrap_or_default();
     Ok(NmapInput {
         target: target.to_string(),
         ports: obj.get("ports").and_then(|v| v.as_str()).map(String::from),

@@ -7,10 +7,97 @@ use crate::alphacode_tui::tui::TuiState;
 use crate::alphacode_tui::tui::info_widget::WidgetPlacement;
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use super::selection_highlight::highlight_line_selection;
+
+use super::config_overlay::{self, ConfigSetting};
+
+/// Render the interactive settings overlay (`/config ui`).
+///
+/// Geometry and content come from `config_overlay`; painting lives here because
+/// this module already owns the shared theme helpers. The highlight clamp is
+/// *not* reimplemented here — it is called from there — so the row the arrow
+/// keys move and the row that is painted can never disagree.
+pub(super) fn draw_config_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    settings: &[ConfigSetting],
+    selected: usize,
+    notice: Option<&str>,
+) {
+    clear_area(frame, area);
+
+    // The footer row is reserved unconditionally here rather than only when a
+    // notice exists, because the row is also used to show the `config.toml` key
+    // for the highlighted setting — which is the thing a user opening this
+    // overlay most often wants to know.
+    let layout = config_overlay::layout(area, settings.len(), true);
+    let block = Block::default()
+        .title(Span::styled(
+            config_overlay::TITLE,
+            Style::default()
+                .fg(accent_color())
+                .add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(dim_color()));
+    frame.render_widget(Clear, layout.frame);
+    frame.render_widget(block, layout.frame);
+    // The mouse handler dismisses the overlay on a click outside the box, and
+    // it has to judge that against the rectangle that was actually drawn.
+    config_overlay::record_painted_frame(layout.frame);
+
+    // Clamp once so the highlight the keys move and the row that gets painted
+    // cannot disagree if the list shrank since the last keypress.
+    let selected = config_overlay::clamp_selection(selected, settings.len());
+
+    if layout.list.height > 0 {
+        let items: Vec<ListItem> = config_overlay::visible_rows(settings, selected, layout)
+            .into_iter()
+            .map(|(index, setting)| {
+                let base = if index == selected {
+                    Style::default().add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                let marker = if setting.current { "on" } else { "off" };
+                let marker_style = if setting.current {
+                    Style::default().fg(accent_color())
+                } else {
+                    Style::default().fg(dim_color())
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!(" {marker:>3}  "), marker_style),
+                    Span::styled(format!("{:<22}", setting.label), base.fg(user_text())),
+                    Span::styled(setting.description.to_string(), base.fg(dim_color())),
+                ]))
+            })
+            .collect();
+        frame.render_widget(List::new(items), layout.list);
+    }
+
+    if layout.footer.height > 0 {
+        // Show the config.toml path for the highlighted row even when there is
+        // no recent change: it is where the value actually lives, which is what
+        // a user came to `/config ui` to find out.
+        let footer = match notice {
+            Some(notice) => notice.to_string(),
+            None => settings
+                .get(selected)
+                .map(|setting| format!("config.toml: {}", setting.key))
+                .unwrap_or_default(),
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!(" {footer}"),
+                Style::default().fg(dim_color()),
+            )),
+            layout.footer,
+        );
+    }
+}
 
 pub(super) fn draw_changelog_overlay(
     frame: &mut Frame,
@@ -239,6 +326,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
         "Render full agentgrep search output inline in chat",
     ));
     lines.push(help_entry("/config", "Show active configuration"));
+    lines.push(help_entry(
+        "/config ui",
+        "Open the interactive settings overlay",
+    ));
     lines.push(help_entry("/config init", "Create default config file"));
     lines.push(help_entry("/config edit", "Open config in $EDITOR"));
     lines.push(help_entry("/dictate", "Run configured external dictation"));

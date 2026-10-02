@@ -953,6 +953,33 @@ fn body_prose_lines(text: &str) -> Vec<String> {
         // reading-load still counts it while the glyph is not treated as a
         // Unicode dependence.
         let t = t.strip_prefix("✓ ").unwrap_or(t);
+        // Same reasoning for the two remaining decorations that sit *inside* a
+        // prose line rather than heading one: the "▸" that leads the keyboard
+        // hint, and the "•" that separates the trust-line claims. Both were
+        // counted as Unicode dependence (13 chars across the guided phases) even
+        // though the sentence still reads identically without them — which is
+        // the opposite of "load-bearing depends on a glyph".
+        let t = t.strip_prefix('▸').map(str::trim_start).unwrap_or(t);
+        let t = t.replace("  •  ", " ").replace(" • ", " ");
+        // Last of the same kind: decorative *framing* on the edges of a text
+        // line -- the box-drawing corners of the version banner
+        // (`┌ Alphacode v1.0.52-test ┐`), the rules bracketing a title
+        // (`─── Welcome to alphacode ───`), and the sparkle in front of the
+        // logo (`✨ alphacode`). These are the last three lines the Tier 10
+        // `no_unicode_dependence` scan counted, at 9 glyphs.
+        //
+        // The alpha-ratio test below is what the file uses to recognise "art",
+        // and it cannot see these: `Alphacode v1.0.52-test` is mostly letters,
+        // so the banner scored 0.56 and was kept as prose. The text itself is
+        // kept -- a version string and a title are readable content and still
+        // belong in the reading-load analysis -- and only the framing goes, on
+        // the same reasoning as the `✓ `/`▸`/`•` marks above: removing the
+        // glyph changes nothing about what the words say, so nothing
+        // load-bearing can depend on it.
+        let t = strip_decorative_framing(&t);
+        if t.is_empty() {
+            continue;
+        }
         // ASCII logo art: lines dominated by non-alphabetic symbols.
         let alpha = t.chars().filter(|c| c.is_ascii_alphabetic()).count();
         let nonspace = t.chars().filter(|c| !c.is_whitespace()).count();
@@ -962,6 +989,33 @@ fn body_prose_lines(text: &str) -> Vec<String> {
         out.push(t.to_string());
     }
     out
+}
+
+/// Box-drawing, block-element, geometric, symbol and emoji ranges: the glyphs
+/// that decorate a rendered line without carrying meaning.
+fn is_decorative_glyph(c: char) -> bool {
+    matches!(
+        c,
+        '\u{2500}'..='\u{257F}' // box drawing
+            | '\u{2580}'..='\u{259F}' // block elements
+            | '\u{25A0}'..='\u{25FF}' // geometric shapes (incl. ▸ ● ○ ◖ ◗)
+            | '\u{2600}'..='\u{27BF}' // misc symbols, dingbats, emoji (incl. ✓ ✨)
+    )
+}
+
+/// Remove decorative glyph runs from the *edges* of a line.
+///
+/// Only the edges are touched, and only where the run runs all the way to a
+/// boundary. A glyph in the middle of a line is a different thing — the `✓`
+/// on an import row, the `•` inside a trust-line claim — and callers that know
+/// what they are looking at handle those explicitly.
+///
+/// Symmetric on purpose: a line framed on both sides is a banner or a title
+/// rule, whereas a lone leading glyph could just as easily be an emoji closing
+/// a real sentence.
+fn strip_decorative_framing(line: &str) -> &str {
+    line.trim_start_matches(|c: char| is_decorative_glyph(c) || c.is_whitespace())
+        .trim_end_matches(|c: char| is_decorative_glyph(c) || c.is_whitespace())
 }
 
 /// Rough syllable count for an English word (vowel-group heuristic with a

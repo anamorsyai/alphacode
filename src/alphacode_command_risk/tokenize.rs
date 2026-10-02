@@ -16,6 +16,16 @@ pub struct Token {
     pub is_truncating_redirect_target: bool,
     /// True for control operators like `&&`, which are never path targets.
     pub is_operator: bool,
+    /// True when any part of this word was quoted in the original command.
+    ///
+    /// Quotes are resolved into `text`, so `grep -rn "sh" src/` and
+    /// `grep -rn sh src/` are indistinguishable from `text` alone. That is
+    /// correct for path comparison (`rm "$HOME"` must equal `rm $HOME`) but
+    /// wrong for deciding whether a word is *executed*: a shell name inside a
+    /// quoted argument is data -- a grep pattern, a commit message, an `echo`
+    /// body -- and never becomes a program. Recorded separately so both
+    /// questions can be answered from one tokenization.
+    pub was_quoted: bool,
 }
 
 impl Token {
@@ -25,6 +35,7 @@ impl Token {
             receives_pipe: false,
             is_truncating_redirect_target: false,
             is_operator: false,
+            was_quoted: false,
         }
     }
 
@@ -132,6 +143,9 @@ pub fn tokenize(command: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut current = String::new();
     let mut has_content = false;
+    // Set whenever a quote is seen for the word being accumulated; stamped onto
+    // the token at flush time.
+    let mut quoted = false;
     let mut chars = command.chars().peekable();
     let mut pending_redirect = false;
 
@@ -145,6 +159,8 @@ pub fn tokenize(command: &str) -> Vec<Token> {
                         token.is_truncating_redirect_target = true;
                         pending_redirect = false;
                     }
+                    token.was_quoted = quoted;
+                    quoted = false;
                     has_content = false;
                 }
                 tokens.push(token);
@@ -156,6 +172,7 @@ pub fn tokenize(command: &str) -> Vec<Token> {
         match c {
             '\'' => {
                 has_content = true;
+                quoted = true;
                 for q in chars.by_ref() {
                     if q == '\'' {
                         break;
@@ -165,6 +182,7 @@ pub fn tokenize(command: &str) -> Vec<Token> {
             }
             '"' => {
                 has_content = true;
+                quoted = true;
                 while let Some(q) = chars.next() {
                     if q == '"' {
                         break;

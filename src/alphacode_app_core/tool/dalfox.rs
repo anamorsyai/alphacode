@@ -313,17 +313,12 @@ fn normalize_dalfox_input(input: &Value) -> Result<DalfoxInput> {
     if let Ok(params) = serde_json::from_value::<DalfoxInput>(input.clone()) {
         return Ok(params);
     }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "dalfox expects a JSON object with `url`, e.g. {{\"url\": \"https://example.com/search?q=test\"}}"
-        )
-    })?;
-    let url = ["url", "target", "u"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("missing field `url`. Provide the target URL as `url`."))?;
+    // Aliases, bare-URL strings and truncated payloads all resolve through the shared
+    // coercion ladder; a hand-rolled key list missed every other shape.
+    let url = super::coerce_url_arg(input, "dalfox")?;
+    // Remaining options are optional. A payload that was a bare URL string has no
+    // object to read them from, so an empty map stands in for the defaults.
+    let obj = input.as_object().cloned().unwrap_or_default();
     Ok(DalfoxInput {
         url: url.to_string(),
         param: obj.get("param").and_then(|v| v.as_str()).map(String::from),

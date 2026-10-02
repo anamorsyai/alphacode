@@ -162,6 +162,79 @@ this reaches admin data") and let the user or program grant it.
 
 ---
 
+## REAL-WORLD BRUTE FORCE — SMALL LISTS WIN
+
+The default assumption in this skill is that credential attacks need
+large wordlists and long runtimes. That is backwards for the most
+common real-world case.
+
+**An 8-digit numeric password was cracked with a 47-word list in
+seconds.** The list was not a breach corpus — it was company vocabulary:
+`admin`, `password`, `12345678`, `ebla`, `trading`, `company`, `2024`,
+`2025`, plus common defaults. The password was `12345678`, tried at
+position 6 of round 1.
+
+### The lesson: build the list from the target's own words
+
+A generic `rockyou.txt` spray against a trading platform gets
+rate-limited and produces nothing. A 50-word list built from the
+company name, product names, year, and common defaults cracks weak
+admin credentials before the first lockout threshold is reached.
+
+**Wordlist generation order:**
+1. Company name + variants (lowercase, capitalized, with/without space)
+2. Product/service names from the website
+3. Current year ± 2 years
+4. Common defaults: `admin`, `password`, `123456`, `12345678`,
+   `1234567`, `admin123`, `letmein`, `welcome`
+5. Company name + year + `!`/`@`/`123` suffixes
+6. Numeric sequences (7-8 digits) — weak PINs are extremely common
+   for admin accounts on small platforms
+
+**Total target size: under 100 words.** A larger list is not more
+likely to hit — it is more likely to trigger rate limiting.
+
+### Spray order matters more than list size
+
+Spray one password across all users, then move to the next password.
+With a 50-word list and a 1-user target, this is identical to brute
+force — but the principle still applies with multiple accounts.
+
+### Default-credential check before any wordlist
+
+The single highest-probability test is not a wordlist at all: try the
+literal defaults first, in order, with no delay:
+```
+admin / admin
+admin / password
+admin / 123456
+admin / 12345678
+admin / admin123
+```
+
+These five attempts take seconds and crack a large fraction of
+admin accounts on small platforms. **Run this before generating any
+wordlist.** If it hits, the credential-attack pipeline is done —
+document and move to authenticated testing.
+
+### Rate-limit behaviour is the finding, not an obstacle
+
+If the login endpoint returns 429 after N attempts, record N. That is
+a Low/Medium finding on its own and it tells you whether a longer
+spray is feasible. Do not try to defeat the rate limit — characterise
+it and stop (see `control-verification`).
+
+### After a hit: stop, do not explore
+
+A cracked credential is the end of the credential-attack phase. Do
+not use it to browse other users' data or attempt privilege
+escalation — that crosses from authorized credential testing into
+unauthorized access. Document the credential class (weak admin
+password, default creds, numeric PIN) and let the owner know. If
+authenticated testing is needed to confirm impact, ask the user.
+
+---
+
 ## LEGAL GUARDRAILS
 
 Before running `/spray` against ANY target, verify:

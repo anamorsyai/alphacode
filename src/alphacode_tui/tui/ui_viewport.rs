@@ -1323,6 +1323,23 @@ fn windowed_min(widths: &[u16], window: usize) -> Vec<u16> {
     out
 }
 
+/// Whether a rendered line is only a decorative rule (`┄`, `─`) and carries no
+/// text.
+///
+/// The todo card opens with such a rule to set itself apart from surrounding
+/// transcript. It is worth a line in a full card, but in the two-to-four line
+/// pinned band it is the difference between showing a task and showing a rule,
+/// so the band drops it when it has to truncate.
+fn is_decorative_rule(line: &Line<'static>) -> bool {
+    let text: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    let trimmed = text.trim().trim_end_matches(['┄', '─', '━']).trim();
+    trimmed.is_empty()
+}
+
 /// Lines for the pinned todo band (`display.pin_todos`): the full inline todo
 /// card rendered at the top of the viewport while scrolled, capped to roughly
 /// a third of the viewport so the transcript stays usable. Empty when the
@@ -1351,14 +1368,33 @@ fn pinned_todo_band_lines(
     if card_lines.is_empty() {
         return Vec::new();
     }
-    // Band budget: compact summary, max 4 lines so it never blocks the view.
-    let budget = ((viewport_height as usize) / 6).clamp(2, 4);
+    // Band budget: compact summary, max 6 lines so it never blocks the view.
+    //
+    // The minimum is 4, not 2, and the distinction is load-bearing. The budget
+    // covers the separator *and* the overflow footer, so a budget of 2 left a
+    // single content line — which the card's own decorative rule then consumed,
+    // leaving the band rendering a rule and a "+3 more (todo)" footer with none
+    // of the items it was counting. A band that names no task is worse than no
+    // band: the reader trusts it to be showing their work. Four lines covers a
+    // status header plus the first task and still stays under a third of a
+    // 14-row viewport, which is where this regressed.
+    let budget = ((viewport_height as usize) / 6).clamp(4, 6);
     let content_budget = budget.saturating_sub(1);
     let mut lines: Vec<Line<'static>> = Vec::new();
     if card_lines.len() > content_budget {
-        let shown = content_budget.saturating_sub(1);
-        let hidden = card_lines.len() - shown;
-        lines.extend(card_lines.into_iter().take(shown));
+        let shown = content_budget.saturating_sub(1).max(1);
+        // The card's first line is a decorative `┄` rule that exists to set the
+        // card apart from surrounding text. In the *full* card that reads
+        // correctly; in a band two lines tall it consumed the only content
+        // slot, so the band showed a rule, a "+2 more (todo)" footer, and none
+        // of the items it was counting. Drop it when the card is truncated —
+        // the band already has its own separator underneath.
+        let mut pool = card_lines;
+        if pool.first().is_some_and(is_decorative_rule) {
+            pool.remove(0);
+        }
+        let hidden = pool.len().saturating_sub(shown);
+        lines.extend(pool.into_iter().take(shown));
         lines.push(Line::from(Span::styled(
             format!("  … +{} more (todo)", hidden),
             Style::default().fg(dim_color()),

@@ -3359,6 +3359,11 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
         return true;
     }
 
+    if trimmed == "/config ui" || trimmed == "/config overlay" {
+        app.open_config_overlay();
+        return true;
+    }
+
     if trimmed == "/config init" || trimmed == "/config create" {
         use crate::alphacode_tui::config::Config;
         match Config::create_default_config_file() {
@@ -3451,7 +3456,8 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
 
     if trimmed.starts_with("/config ") {
         app.push_display_message(DisplayMessage::error(
-            "Usage: /config (show), /config init (create), /config edit (open in editor)"
+            "Usage: /config (show), /config ui (interactive settings), /config init (create), \
+             /config edit (open in editor)"
                 .to_string(),
         ));
         return true;

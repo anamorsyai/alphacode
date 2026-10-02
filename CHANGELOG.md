@@ -6,6 +6,315 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.68] - 2026-10-01
+
+### Added
+
+- **`-AddPath` for the Windows installer.** `install.sh --add-path` has configured
+  PATH for Unix users since it was written; Windows users had to hand-edit
+  `HKCU\Environment\Path` while the README claimed the installer did it for them.
+  `-AddPath` closes that gap, and is deliberately narrow:
+  - writes **only** `HKCU\Environment\Path`. The machine-wide PATH is never
+    touched — that needs admin and would affect every user on the machine;
+  - **never rewrites `$env:PATH`.** The session PATH is the merge of user +
+    machine + anything the session added; rebuilding it from the registry would
+    silently drop those session-only entries. The running shell is left alone and
+    you open a new one;
+  - **appends, never prepends**, so no pre-existing entry changes precedence.
+    Nothing moves, so nothing that used to resolve to `git`/`python`/`node` can
+    start resolving to something else;
+  - reads the value *unexpanded* and writes it back with its original registry
+    kind. `[Environment]::GetEnvironmentVariable('Path','User')` expands
+    `REG_EXPAND_SZ`, so a PATH containing `%USERPROFILE%\bin` would have come
+    back already substituted and been frozen to today's literal path — a silent,
+    permanent regression for anyone who later renames their user directory or
+    copies the install elsewhere;
+  - refuses rather than truncating if the result would exceed the Windows
+    32767-character limit;
+  - is a no-op on a re-run, and compares entries case-insensitively and ignoring
+    trailing separators, so it cannot accumulate duplicates;
+  - broadcasts `WM_SETTINGCHANGE`, the same call `setx` and Chocolatey make.
+    Without it the write silently succeeds and appears to do nothing until the
+    next reboot, which is the usual "the installer lied to me" report;
+  - `-PathDryRun` prints the exact value it would write and commits nothing.
+  `uninstall.ps1` now removes the entry again (pass `-KeepPath` to leave it),
+  so installing and uninstalling does not leave a PATH entry pointing at a
+  directory that no longer exists.
+
+### Fixed
+
+- **The Windows installer chose the wrong directory under Windows PowerShell
+  5.1.** The install prefix was selected with `$IsWindows`, a variable that only
+  exists in PowerShell 6+. The documented invocation is `iwr ... | iex`, which
+  on a default Windows machine runs 5.1, where `$IsWindows` is undefined and
+  evaluates to `$null` — so the Windows branch was dead code on the shell most
+  users actually run, and binaries silently went to `$HOME/.local` instead of
+  `%LOCALAPPDATA%\alphacode`. That also made `uninstall.ps1` miss them: it looks
+  for `%LOCALAPPDATA%\alphacode\bin`, so uninstalling reported success while
+  leaving the binary behind. The check now uses
+  `[Environment]::OSVersion.Platform`, which behaves the same in every edition.
+
+- **A non-ASCII character could silently break the PowerShell installer.**
+  `install.ps1` is distributed as `iwr ... | iex` and is routinely run by Windows
+  PowerShell 5.1, which decodes a BOM-less file as the ANSI code page. In CP1252
+  the byte `0x94` is a right double quotation mark, so a UTF-8 em dash
+  (`E2 80 94`) decodes to two mojibake characters *and a closing quote* — which
+  terminates the surrounding string and turns the rest of the line into a
+  syntax error. `install.ps1` already carried one such character. CI could not
+  have caught it: the check used `PSParser::Tokenize`, which only splits text
+  into tokens and never checks that they form a valid script. The scripts are now
+  ASCII-only, and CI does three things it previously did none of: **parses** the
+  scripts with `[Parser]::ParseFile` instead of tokenizing them, **fails on any
+  non-ASCII byte** in a `.ps1`, and **runs the PATH tests**.
+- **`scripts/tests/install-path.tests.ps1` covers the PATH logic.** The
+  installer mutates a system-level setting, so the decision-making half is a
+  pure function over a string and is exercised over a matrix of shapes — empty,
+  `;;`-doubled separators, trailing separators, case differences, `%VAR%`
+  references, paths with spaces, sibling directories sharing a prefix, and
+  re-runs — plus a dry run that asserts the registry and the session PATH are
+  both untouched. The suite loads the functions by parsing `install.ps1`'s AST
+  rather than dot-sourcing it, so it never downloads or installs anything, and
+  it asserts the functions are *callable* rather than merely present: an earlier
+  version checked names only, and reported green while every test failed with
+  "not recognized". Four deliberate mutations of the planner (prepend instead of
+  append, case-sensitive compare, prefix match, `%VAR%` expansion) were each
+  caught by the suite.
+
+- **`bash` rejected usable commands with "missing field `command`".** The alias
+  recovery was case-sensitive and only accepted the value if `command` was
+  already a JSON string, so a capitalised key (`Command`), a bare-string payload,
+  or any loosely-shaped wrapper produced the same "missing field" error as a call
+  that genuinely carried nothing. Recovery now goes through the shared
+  `coerce_command_field`, which also adds case-insensitive lookup, and the
+  fix-it line shows a command (`ls -la`) rather than a file path. It deliberately
+  has **no** "the only string field must be the command" fallback, because
+  `BashInput` also carries `intent` and `justification` — that fallback would
+  execute a description of what to do as a shell line. `{"intent": "clean the tmp
+  directory"}` is rejected, and there is a test saying so.
+
+- **The onboarding accessibility metric counted its own banner chrome.** Tier
+  10's `no_unicode_dependence` scan is documented as counting load-bearing prose,
+  with "logo is decorative" excluded. It detected art with a single heuristic —
+  a line whose letters are under half its non-space characters — and three lines
+  slipped past it: the version banner `┌ Alphacode v1.0.52-test ┐` (0.56, mostly
+  letters), the title rule `─── Welcome to alphacode ───`, and the logo
+  `✨ alphacode`. Nine glyphs, which is what the assertion reported. Decorative
+  framing is now stripped from the edges of a prose line and the text kept, on
+  the same reasoning already applied to the `✓ `/`▸`/`•` marks in that function:
+  the glyph carries nothing the words do not, so nothing load-bearing can depend
+  on it. Stripping is symmetric — a line framed on both sides is a banner or
+  title rule, whereas a lone leading glyph could equally be an emoji closing a
+  real sentence.
+
+- **A malformed call's failure streak was never cleaned up, and a success only
+  cleared one of the two tiers.** Both surfaced while fixing the loop below:
+  `clear_session` collected the keys to drop from the runtime-failure map alone,
+  so a session's *malformed* streaks survived into the next session that reused
+  the id — and the stored error text was never dropped at all, leaking one
+  session's messages into another and growing without bound. `record_success` was
+  written `failures.remove(..).is_some() || malformed.remove(..).is_some()`,
+  whose short-circuit skips the second removal whenever the first one hits, so a
+  malformed streak survived a success.
+
+- **An identical malformed tool call could be re-sent without limit.** `write`
+  and `bash` both reported `missing field \`file_path\`` /
+  `missing field \`command\``, "The call carried no arguments at all", and the
+  model re-sent the byte-identical call — eight times in one observed session,
+  each one burning a turn to re-learn the same thing. The repeat guard was
+  capable of stopping this and was being told not to: input-validation errors
+  called `clear_failure`, which *erased* the failure streak for that exact
+  (tool, input) pair, so the count could never climb. That exemption bought
+  nothing, because the streak is keyed on the input — a model that genuinely
+  fixes the call sends different input and starts from zero regardless. Malformed
+  calls are now counted in their own tier with their own limit (3, deliberately
+  more forgiving than the runtime-failure limit of 2), and the refusal quotes the
+  last error and the keys that actually arrived instead of re-reporting the same
+  sentence forever.
+
+- **Ordinary commands were hard-denied for merely mentioning a shell.** The
+  defense-in-depth scan for a destructive verb hidden behind an unparseable
+  wrapper also matched *shell names anywhere in the segment*, and a `Catastrophic`
+  verdict is explicitly "no amount of model justification can unlock it". So
+  `grep -rn "sh" src/`, `git commit -m "fix the sh wrapper"`,
+  `echo "run bash later"` and `grep -r "powershell" docs/` were all refused
+  outright — 6 of 7 routine commands in the reported session, over the word `sh`.
+  Two exclusions fix it without opening a hole: a word that was **quoted** in the
+  original command is data (a grep pattern, a commit message, an echo body is
+  never executed), and a program that only reads cannot execute its arguments.
+  `docker run img sh -c "rm -rf /"`, `npm run sh` and
+  `find . -exec sh -c 'rm -rf /'` all still fail, because in each the shell is an
+  unquoted operand of something that can run it. `Token` gained a `was_quoted`
+  bit for this; it is purely additive and does not affect path grading, so
+  `rm -rf "$HOME"` still grades identically to `rm -rf $HOME` and quoting is not a
+  bypass of the protected-path checks. `false_positive_tests.rs` is the companion
+  to the existing `bypass_tests.rs`: a gate that denies ordinary work is as broken
+  as one that admits destructive work.
+
+- **A cleared default model/provider could never be cleared.** `ProviderConfig::default`
+  ships `default_model = "kilo-auto/free"` and `default_provider = "alphax-free"`,
+  `#[serde(default)]` on the struct re-injects both for every key `config.toml`
+  omits, and `save` drops a `None` field entirely because TOML has no null. So
+  setting the default to nothing round-tripped straight back to the shipped value:
+  `/model` "don't save a default" and `set_default_model(None, …)` were both
+  no-ops that looked like they worked. Every "did the user pick this?" check was
+  then answered by the fallback, which is why onboarding never preferred the
+  strongest model for a first-run user — the one case that path exists for.
+  `Config::has_explicit_provider_defaults` now reads the raw document, where
+  "absent" is still distinguishable from "set", and treats a missing or
+  unparseable file as "no explicit choice" rather than as a configured install.
+
+- **`/config ui` swallowed every key, including `Ctrl+C`.** The overlay claimed
+  all input and returned before the global control shortcuts ran, so an open
+  settings overlay made the app impossible to interrupt or quit with the
+  keyboard, and the mouse did nothing at all — the transcript underneath kept
+  scrolling behind a modal box. `Ctrl` chords now stay global, the wheel steps
+  the setting list, and a click outside the box dismisses it (judged against the
+  rectangle that was actually painted).
+
+- **`/config ui` rendered off-screen on short or narrow terminals.** The width
+  was clamped to a 24-column minimum *before* being capped by the terminal, so a
+  10-column terminal got a 24-wide box whose right edge was cut off, and the
+  height could push the status line below the bottom of the screen. Both are now
+  capped by the area last, and the footer row is only reserved when the list has
+  a row to spare.
+
+- **`webfetch` reported "followed 0 redirect(s)" for every redirected fetch.**
+  The hop counter was threaded from the redirect loop into the result, but
+  `Attempt::Done` hard-coded `hops: 0`, so a fetch that followed three hops
+  told the model it followed none — and the model reads that as "this URL served
+  the content directly", hiding the exact hop worth noticing. The count is now
+  the real one, and a loop that somehow runs past the bound reports an error
+  instead of hitting an `unreachable!()` panic.
+
+- **`jwt` forged `alg:none` tokens that no server would accept, causing missed
+  findings.** The `hunt-jwt` skill instructs the agent to forge an unsecured
+  token with this tool and send it to the endpoint that rejected the original.
+  `forge`, `manipulate`, and `forge_secret` emitted a *two-part* token
+  (`header.payload`) when the signature was empty. A compact JWS is always three
+  dot-separated parts — for `alg: none` the signature is the empty string, but
+  the trailing dot is still part of the serialization (RFC 7519 §6). Strict
+  servers reject the two-part form as malformed, and the tool's own `decode`
+  rejected it as "expected 3 parts". The agent would send the token, see it
+  fail, and report that the `alg:none` bypass does not work — a false negative
+  caused by our encoder rather than by the target. All three paths now emit
+  `header.payload.`, and `decode` names the missing-dot case explicitly instead
+  of just counting parts.
+
+- **`webfetch` reported `missing field \`url\`` for argument shapes that are
+  perfectly valid.** A bare `serde_json::from_value` rejected an alias key
+  (`uri`, `target`, `href`), a bare URL string where an object was expected, a
+  single-element array wrapper, and any payload truncated by the provider's
+  streaming decoder — each of which is a recoverable typo that cost a whole
+  agent turn, and each of which the model then retried byte-for-byte until the
+  repeat guard blocked it. All four now resolve through a shared coercion
+  ladder (`coerce_url_arg`, `coerce_host_arg`, `coerce_text_arg`), adopted by
+  `webfetch`, `websearch`, `read`, `write`, `katana`, `unfurl`, `scrapling`,
+  `nmap`, `subfinder`, `amass`, `assetfinder`, `nikto`, `sqlmap`, `dalfox`,
+  `gobuster` and `feroxbuster`. When nothing can be recovered the error names
+  the field, the fix, *and* the keys that actually arrived, with an example
+  shaped for that field — a host tool is no longer told to send a path.
+- **`write` reported `missing field \`file_path\`` — and could have silently
+  written a half file.** A long `write` body is the most likely argument in any
+  session to exceed the provider's `max_tokens`, and the decoder discarded the
+  surviving fields entirely. Complete key/value pairs are now read back out of a
+  truncated payload; an *unterminated* trailing string is deliberately **not**
+  recovered, because handing `write` a prefix of a file body would leave a
+  corrupt file. When the payload was truncated, `write` refuses to overwrite an
+  existing non-empty file at all, and writes to a new file carry an explicit
+  warning in their output.
+- **The `webfetch` SSRF guard was bypassable through redirects.** The guard
+  validated the initial URL only, while the shared HTTP client used reqwest's
+  default redirect policy (`limit(10)`). A public URL returning
+  `302 Location: http://169.254.169.254/latest/meta-data/` was followed straight
+  past it, turning every guarded fetch into an open proxy to the cloud metadata
+  service and a browser-as-a-service for anything on loopback. The fetch client
+  now disables automatic redirects and `webfetch` follows them by hand,
+  re-running the full guard on every hop (with the correct 301/302/303/308
+  method-downgrade rules and a 5-hop bound). Redirection is reported in the
+  output rather than silently substituting the final URL.
+- **Anti-bot detection false-positived on ordinary English.** `"just a moment"`
+  (every latency article) and `"ray id"` (generic) were treated as proof of a
+  challenge, so those pages paid a wasted request per fetch and could still be
+  reported as blocked. Both now require a corroborating vendor marker. The
+  check also stopped copying the whole body into a lowercased buffer — it uses
+  precompiled `(?i)` literals over the first 16 KB plus a header-level check, so
+  a 5 MB page is no longer scanned five times through an extra 5 MB allocation.
+- **HTML→markdown rewrote the contents of code blocks.** `<pre>` bodies were run
+  through the `<strong>`/`<em>`/`<code>`/`<li>` passes, so `**` in a stack trace
+  became markdown emphasis, an `_var_` in a payload lost characters, and blank
+  lines were reflowed away. For a security tool this is the worst kind of error:
+  a wrong payload that still looks right. Fenced code is now extracted first and
+  re-inserted verbatim after the entity decode, and blank-line collapsing skips
+  fence interiors. Entity decoding is also single-pass — `&amp;lt;` no longer
+  decodes into a real `<`.
+- **Redundant full-buffer copies dominated HTML conversion.** Every stage read
+  `text = re.replace_all(&text, "").to_string()`, cloning the entire body
+  *again* after `replace_all` had already returned an owned `String`; 15 (text)
+  to 25 (markdown) passes over a body that reaches 5 MB is ~100 MB of pointless
+  allocation and memcpy per fetch. Stages now consume the buffer without a
+  second copy and skip entirely when the pattern is absent. Markup-free
+  payloads (JSON, source, CSV) skip the tag passes altogether, which also stops
+  a `<foo>` inside a JSON string literal being stripped.
+- **`smart_stream` allocated twice per line on every tool output.**
+  `normalize_line` made a `Vec`, a `join`, and a `to_lowercase`; `char_bigram_count`
+  copied the line into a fresh allocation and is called up to 32 times per line
+  inside the fuzzy-dedup window. Both are now single-pass and allocation-free,
+  with a length gate in front of the bigram comparison. Filtering results are
+  also measured against the char budget, so the reported reduction describes
+  what the model actually receives instead of always reading as over budget.
+- **One mistyped optional field could cost an entire call.** `katana`, `read`
+  and `websearch` rejected a payload outright over one mistyped optional value
+  (`"threads": "20"` instead of `20`). Those fields are now coerced or dropped,
+  with the rest of the request honoured.
+- **Settings can be changed in-app instead of by hand-editing `config.toml`.**
+  `/account <provider> settings` was read-only: it printed the current values
+  and then listed the `/account … ` commands you would have to type by hand,
+  which is the complaint on issue #6. `/config ui` now opens an interactive
+  overlay — arrow keys to move, Space/Enter to toggle, Esc to close — covering
+  compact notifications, pinned todos, centered output, agentgrep output, and
+  tool-call detail. Every row persists through the same `Config` setter the typed
+  commands use, so the two paths cannot drift, and the change applies on the
+  next frame without a restart. Failed writes are reported in the overlay rather
+  than silently reverting, and `/config ui` is listed in the help overlay, the
+  `/help config` entry, the completion list, and the `/config` usage line — a
+  command you have to guess the name of does not fix the problem it was added
+  for.
+- **Scrolling up mid-session moved the cursor to a random place and stopped
+  working (issue #6).** While output was streaming, `scroll_up` converted
+  bottom-follow mode into an absolute offset using the renderer's extent, but
+  then clamped against `scroll_max_estimate()`, which is *deliberately
+  inflated* so it never falls behind text that has been appended but not yet
+  drawn. The stored offset and the drawn position therefore disagreed: the next
+  frame clamped the view somewhere unrelated, and because the offset was then
+  already at zero, every subsequent scroll-up was a no-op. The same mismatch
+  existed in `pause_chat_auto_scroll`, reached by starting a drag-select. Both
+  now resolve against the extent the renderer actually clamps against, and only
+  fall back to the estimate before the first frame has reported one. The
+  behaviour was session-scoped because the estimate only diverges while
+  streaming, which is why scrolling worked again once the run finished.
+- **`browser` rejected `action='find'`, and could not address an element that
+  `interactables` had just listed.** Three separate gaps made "find this element
+  and click it" impossible. `find` (and `search`/`locate`/`query`/`elements`)
+  was refused outright, so the agent invented another name to locate an element
+  instead of using the action built for it; those now normalize to
+  `interactables`. `interactables` returned 1-based ordinals (`1.`, `2.`, `3.`)
+  while the extension's `resolveElement` selects by a 0-based `index` — and the
+  tool had no parameter to pass one, so the number the agent read meant nothing
+  and it guessed a selector instead. That is the direct cause of the
+  `click` → `Element not found` loop. The output now prints `index=N` and
+  `index` is accepted on `click`/`hover`/`type`. Separately, the extension
+  filters candidates through `visible()`, so an element inside a collapsed menu
+  or a `display:none` widget resolved to nothing with no way to reach it;
+  `include_hidden` is now forwarded. `interactables` also silently dropped the
+  `contains` filter it is documented to honour, returning all 250 elements
+  instead of the matching handful.
+- `webfetch` no longer rejects valid URL spellings it used to: surrounding
+  whitespace, a mixed-case scheme (`HTTP://`), a protocol-relative URL
+  (`//host/path`), and a scheme-less host (`example.com:8443/health`). The
+  scheme-vs-host distinction was tightened at the same time, so
+  `data:text/html,x` and `javascript:alert(1)` are still rejected rather than
+  promoted to a request against a host named `data`.
+
 ## [1.0.67] - 2026-09-30
 
 > **Upgrade note for 1.0.66 users on Windows:** the in-app updater shipped in
@@ -48,6 +357,20 @@ adheres to [Semantic Versioning](https://semver.org/).
   the input and cannot raise an output cap, so the retry was never going to
   succeed. Output-cap and payload-size errors are now classified separately, and
   neither triggers token compaction.
+- **A transient 404 on `SHA256SUMS` aborted every update, which is what kept
+  1.0.65 users on the broken Windows updater.** In `release.yml` each `build`
+  job uploads its archive straight to the release, and the separate `release`
+  job merges and uploads `SHA256SUMS` afterwards — so for a window the release
+  advertises `SHA256SUMS` while the CDN has not yet propagated it. The client
+  fetched that 571-byte file with no retry at all, while the 21 MB archive got
+  10 attempts with HTTP Range resume, so a single transient `404 Not Found`
+  failed the whole install. The manifest is now fetched with 6 attempts and
+  exponential backoff (~30 s), retrying `404`/`403`/`5xx` and transport errors.
+  It still fails closed if every attempt fails, so an unverified binary is
+  never installed; the error now says the release may still be publishing and
+  to retry, rather than implying the install is broken. Note that a *missing*
+  `SHA256SUMS` entry in the release payload is deliberately not retried — that
+  is a real condition rather than propagation lag.
 - **Emergency compaction no longer reports a fabricated token count.** The
   auto-compact path raises the observed input-token count to the full context
   limit so the compactor agrees it is out of room. Because

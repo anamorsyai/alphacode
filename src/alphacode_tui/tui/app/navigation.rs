@@ -1303,6 +1303,31 @@ impl App {
             }
         }
 
+        if self.config_overlay.is_some() {
+            // The settings overlay is modal, so the transcript underneath must
+            // not scroll or receive clicks while it is up. The wheel steps the
+            // setting list, which is what the user is actually pointing at.
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    self.handle_config_overlay_key(KeyCode::Up);
+                    finish_mouse_event!(false, "config_overlay_step_up");
+                }
+                MouseEventKind::ScrollDown => {
+                    self.handle_config_overlay_key(KeyCode::Down);
+                    finish_mouse_event!(false, "config_overlay_step_down");
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    // A click outside the box dismisses it, matching every other
+                    // overlay and giving the mouse an exit it otherwise lacks.
+                    if !self.mouse_over_config_overlay(mouse) {
+                        self.config_overlay = None;
+                    }
+                    finish_mouse_event!(false, "config_overlay_click");
+                }
+                _ => finish_mouse_event!(false, "config_overlay_other"),
+            }
+        }
+
         if let Some(ref picker_cell) = self.session_picker_overlay {
             // Route wheel events over the preview pane through the shared
             // scroll-momentum queue so the picker scrolls with the same smooth
@@ -1677,14 +1702,48 @@ impl App {
             return true;
         }
         let before = (self.scroll_offset, self.auto_scroll_paused);
-        let max = self.scroll_max_estimate();
         if !self.auto_scroll_paused {
+            // Converting from bottom-follow mode to an absolute offset.
+            //
+            // The extent MUST be the one the renderer will clamp against
+            // (`last_max_scroll`), never `scroll_max_estimate()`: the estimate
+            // is deliberately inflated while streaming so it never falls behind
+            // text that has been appended but not yet drawn, and converting
+            // against an inflated extent puts the stored offset above the real
+            // top of the transcript. The next frame clamps it back down, the
+            // viewport lands somewhere unrelated to where the reader was, and
+            // every following scroll-up is a no-op because the offset is already
+            // pinned to zero. That is the reported symptom: the cursor appears at
+            // a random place and the transcript will not scroll up (issue #6).
+            //
+            // `scroll_max_estimate()` remains the fallback for the window before
+            // the first frame has reported an extent at all.
+            let rendered_max = super::super::ui::last_max_scroll();
+            let max = if rendered_max > 0 {
+                rendered_max
+            } else {
+                self.scroll_max_estimate()
+            };
             let current_abs = max.saturating_sub(self.scroll_offset);
             self.scroll_offset = current_abs.saturating_sub(amount);
+            self.scroll_offset = self.scroll_offset.min(max);
         } else {
+            // Already paused: move up by whole lines, never past the top.
+            //
+            // Clamped against the same renderer extent as the conversion above.
+            // `chat_scroll_ceiling` returns the *inflated estimate* while
+            // streaming, so it never clamped an offset the renderer would then
+            // pull down: the stored position and the drawn position disagreed,
+            // which is what made continued upward scrolling look broken mid-run.
+            let rendered_max = super::super::ui::last_max_scroll();
+            let max = if rendered_max > 0 {
+                rendered_max
+            } else {
+                self.scroll_max_estimate()
+            };
             self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+            self.scroll_offset = self.scroll_offset.min(max);
         }
-        self.scroll_offset = self.scroll_offset.min(self.chat_scroll_ceiling(max));
         self.auto_scroll_paused = true;
         // If the upward scroll bottomed out against the top of the currently
         // loaded content, fold the unsatisfied intent into the prefetch as
@@ -1705,7 +1764,18 @@ impl App {
             return;
         }
 
-        let max = self.scroll_max_estimate();
+        // Same extent the renderer clamps against. This path is reached when the
+        // reader starts a drag-select, which is a *sticky* pause: whatever
+        // offset is stored here has to survive many frames of streaming output.
+        // Deriving it from the inflated estimate put it above the real top, so
+        // the very next frame clamped the view somewhere else and the reader
+        // lost their place mid-session.
+        let rendered_max = super::super::ui::last_max_scroll();
+        let max = if rendered_max > 0 {
+            rendered_max
+        } else {
+            self.scroll_max_estimate()
+        };
 
         self.scroll_offset = max.saturating_sub(self.scroll_offset.min(max));
         self.auto_scroll_paused = true;

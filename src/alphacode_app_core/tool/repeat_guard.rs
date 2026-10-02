@@ -20,6 +20,18 @@
 //!   by (tool, input), refused on the third attempt; a success clears the key,
 //!   so a transient failure that later works does not inherit a streak.
 //!
+//! Malformed calls (a missing required argument, an empty argument object) are
+//! counted in a third, separate tier. They used to be *excluded* entirely, on
+//! the theory that a schema mistake is correctable and must never lock a model
+//! out. That exemption had no bound at all: the observed symptom was the same
+//! `write` call, with an empty argument object, failing eight times in a row and
+//! the model re-sending it byte-identically each time. Because the streak is
+//! keyed by (tool, input), excluding malformed calls bought nothing — a model
+//! that genuinely corrects the call sends *different* input and so starts from
+//! zero regardless. Counting them costs a corrected retry nothing and bounds the
+//! loop. The limit is higher than the runtime tier, since a typo is a real
+//! possibility.
+//!
 //! The map is bounded so a month-long session cannot grow it without limit, and
 //! [`clear_session`] drops one session's entries when it tears down.
 
@@ -38,6 +50,14 @@ pub const IDENTICAL_FAILURE_LIMIT: u32 = 2;
 /// name cannot start resolving by being repeated, so a single retry is the
 /// most we allow.
 pub const UNKNOWN_NAME_LIMIT: u32 = 1;
+
+/// Identical *malformed* calls allowed before the next one is refused.
+///
+/// Higher than [`IDENTICAL_FAILURE_LIMIT`] because a mistyped argument is a
+/// normal thing for a model to do once. Low enough to stop the observed loop:
+/// eight identical empty `write` calls, each burning a turn and re-reporting the
+/// same "missing field `file_path`".
+pub const MALFORMED_CALL_LIMIT: u32 = 3;
 
 /// Cap on tracked calls. Oldest keys are evicted first; a false negative (we
 /// forget a streak) only costs one extra tool call.
@@ -61,6 +81,11 @@ enum CallKey {
 #[derive(Default)]
 struct State {
     failures: HashMap<CallKey, u32>,
+    /// Malformed calls, tracked separately so a mistyped argument does not eat
+    /// into the runtime-failure budget (and vice versa). They share `last_error`
+    /// and `order` so the refusal can still quote what went wrong and eviction
+    /// stays bounded across both tiers.
+    malformed: HashMap<CallKey, u32>,
     /// Last error message per key, so the refusal can remind the model what
     /// actually failed instead of a generic "change the arguments".
     last_error: HashMap<CallKey, String>,
@@ -99,12 +124,13 @@ fn key_for(session: &str, name: &str, known: bool, input: &Value) -> CallKey {
 }
 
 fn entry_for<'a>(state: &'a mut State, key: &CallKey) -> &'a mut u32 {
-    if !state.failures.contains_key(key) {
-        while state.failures.len() >= MAX_ENTRIES {
+    if !state.failures.contains_key(key) && !state.malformed.contains_key(key) {
+        while state.failures.len() + state.malformed.len() >= MAX_ENTRIES {
             let Some(oldest) = state.order.pop_front() else {
                 break;
             };
             state.failures.remove(&oldest);
+            state.malformed.remove(&oldest);
         }
         state.order.push_back(key.clone());
     }
@@ -112,6 +138,21 @@ fn entry_for<'a>(state: &'a mut State, key: &CallKey) -> &'a mut u32 {
     // Using `or_insert` via the entry API to avoid a fallible get_mut after
     // insertion, which would be fragile under mutex poisoning.
     state.failures.entry(key.clone()).or_insert(0)
+}
+
+/// Same bookkeeping for the malformed tier.
+fn malformed_entry_for<'a>(state: &'a mut State, key: &CallKey) -> &'a mut u32 {
+    if !state.failures.contains_key(key) && !state.malformed.contains_key(key) {
+        while state.failures.len() + state.malformed.len() >= MAX_ENTRIES {
+            let Some(oldest) = state.order.pop_front() else {
+                break;
+            };
+            state.failures.remove(&oldest);
+            state.malformed.remove(&oldest);
+        }
+        state.order.push_back(key.clone());
+    }
+    state.malformed.entry(key.clone()).or_insert(0)
 }
 
 /// How many times this exact call has already failed in `session`. `known` says
@@ -157,6 +198,41 @@ pub fn record_failure_with_error(
     }
 }
 
+/// How many times this exact call has already been rejected as malformed.
+///
+/// Tracked separately from [`prior_failures`] so a mistyped argument does not
+/// consume the runtime-failure budget, and so the caller can apply
+/// [`MALFORMED_CALL_LIMIT`] instead.
+pub fn prior_malformed(session: &str, name: &str, input: &Value) -> u32 {
+    if session.is_empty() {
+        return 0;
+    }
+    let key = key_for(session, name, true, input);
+    state().malformed.get(&key).copied().unwrap_or(0)
+}
+
+/// Record a malformed call: valid tool, invalid arguments.
+///
+/// This used to call [`clear_failure`] instead, which is why an identical empty
+/// `write` call could be re-sent without limit.
+pub fn record_malformed_with_error(session: &str, name: &str, input: &Value, error: Option<&str>) {
+    if session.is_empty() {
+        return;
+    }
+    let mut state = state();
+    let key = key_for(session, name, true, input);
+    let count = malformed_entry_for(&mut state, &key);
+    *count = count.saturating_add(1);
+    if let Some(message) = error {
+        let mut short = message.trim().to_string();
+        if short.len() > 500 {
+            short.truncate(500);
+            short.push('…');
+        }
+        state.last_error.insert(key, short);
+    }
+}
+
 /// The last recorded error for this exact call, if any.
 pub fn last_error(session: &str, name: &str, known: bool, input: &Value) -> Option<String> {
     if session.is_empty() {
@@ -166,22 +242,6 @@ pub fn last_error(session: &str, name: &str, known: bool, input: &Value) -> Opti
     state().last_error.get(&key).cloned()
 }
 
-/// Clear a failure streak for one exact call without touching other calls.
-///
-/// Input/usage errors are intentionally not a reason to block the next
-/// attempt: the model must be able to correct the shape of a call after a
-/// schema/argument error. Execution failures still use [`record_failure`].
-pub fn clear_failure(session: &str, name: &str, input: &Value) {
-    if session.is_empty() {
-        return;
-    }
-    let mut state = state();
-    let key = key_for(session, name, true, input);
-    state.failures.remove(&key);
-    state.last_error.remove(&key);
-    state.order.retain(|existing| existing != &key);
-}
-
 /// Record that this call succeeded, clearing any failure streak for it.
 pub fn record_success(session: &str, name: &str, input: &Value) {
     if session.is_empty() {
@@ -189,9 +249,13 @@ pub fn record_success(session: &str, name: &str, input: &Value) {
     }
     let mut state = state();
     let key = key_for(session, name, true, input);
-    if state.failures.remove(&key).is_some() {
-        state.order.retain(|existing| existing != &key);
-    }
+    // Both removals unconditional. Written as
+    // `failures.remove(..).is_some() || malformed.remove(..).is_some()` the
+    // second removal is short-circuited away whenever the first hit, so a
+    // malformed streak survived a success.
+    state.failures.remove(&key);
+    state.malformed.remove(&key);
+    state.order.retain(|existing| existing != &key);
 }
 
 impl CallKey {
@@ -210,16 +274,30 @@ pub fn clear_session(session: &str) {
         return;
     }
     let mut state = state();
+    // Gather from both tiers: a key can be present only in `failures`, only in
+    // `malformed`, or in both, and dropping only the first would leave a
+    // session's malformed streaks behind for the next session with the same id.
     let removed: Vec<CallKey> = state
         .failures
         .keys()
+        .chain(state.malformed.keys())
         .filter(|key| key.session() == session)
         .cloned()
         .collect();
     for key in &removed {
         state.failures.remove(key);
+        state.malformed.remove(key);
+        // Stored error text is dropped too. Leaving it behind both leaks one
+        // session's messages into a later session that reuses the id and grows
+        // the map without bound, since nothing else ever evicts `last_error`.
+        state.last_error.remove(key);
     }
-    let live: std::collections::HashSet<CallKey> = state.failures.keys().cloned().collect();
+    let live: std::collections::HashSet<CallKey> = state
+        .failures
+        .keys()
+        .chain(state.malformed.keys())
+        .cloned()
+        .collect();
     state.order.retain(|key| live.contains(key));
 }
 
@@ -287,24 +365,125 @@ mod tests {
         assert_eq!(prior_failures("", "ls", false, &input), 0);
     }
 
+    /// A model that mistypes an argument must be able to fix it and carry on. The
+    /// old code relied on `clear_failure` for this; it is gone, because the
+    /// property it provided falls out of the keying -- a corrected call has a
+    /// different input and therefore a different streak.
     #[test]
     fn validation_failure_can_be_corrected_without_repeat_guard_lockout() {
         let session = "test-guard-validation-correction";
         let invalid = json!({});
         let corrected = json!({"command": "echo ok"});
-        record_failure(session, "bash", true, &invalid);
-        record_failure(session, "bash", true, &invalid);
-        assert_eq!(prior_failures(session, "bash", true, &invalid), 2);
-        clear_failure(session, "bash", &invalid);
-        assert_eq!(prior_failures(session, "bash", true, &invalid), 0);
-        assert_eq!(prior_failures(session, "bash", true, &corrected), 0);
+        record_malformed_with_error(session, "bash", &invalid, Some("missing field `command`"));
+        assert_eq!(prior_malformed(session, "bash", &invalid), 1);
+        assert_eq!(
+            prior_malformed(session, "bash", &corrected),
+            0,
+            "the corrected call must be allowed through"
+        );
         clear_session(session);
+    }
+
+    /// Regression: an identical malformed call used to have no bound at all,
+    /// because validation errors called `clear_failure` and so erased their own
+    /// streak. The observed symptom was the same empty-argument `write` failing
+    /// eight times in a row, each turn re-reporting "missing field
+    /// `file_path`".
+    #[test]
+    fn identical_malformed_calls_are_bounded() {
+        let session = "test-guard-malformed-bound";
+        let empty = json!({});
+        assert_eq!(prior_malformed(session, "write", &empty), 0);
+        for expected in 1..=MALFORMED_CALL_LIMIT {
+            record_malformed_with_error(
+                session,
+                "write",
+                &empty,
+                Some("missing field `file_path`"),
+            );
+            assert_eq!(prior_malformed(session, "write", &empty), expected);
+            // The limit is what the caller compares against, so reaching it
+            // must be observable.
+            assert!(
+                prior_malformed(session, "write", &empty) < MALFORMED_CALL_LIMIT
+                    || expected == MALFORMED_CALL_LIMIT
+            );
+        }
+        assert_eq!(
+            prior_malformed(session, "write", &empty),
+            MALFORMED_CALL_LIMIT,
+            "the guard must fire at the documented limit"
+        );
+        clear_session(session);
+        assert_eq!(prior_malformed(session, "write", &empty), 0);
+    }
+
+    /// The point of counting malformed calls rather than exempting them: a
+    /// model that actually fixes the call must still be allowed through, with no
+    /// clearing needed, because the streak is keyed on the input.
+    #[test]
+    fn a_corrected_malformed_call_starts_from_zero() {
+        let session = "test-guard-malformed-corrected";
+        let broken = json!({"file_path": "a.rs"});
+        let fixed = json!({"file_path": "a.rs", "content": "x"});
+        for _ in 0..MALFORMED_CALL_LIMIT {
+            record_malformed_with_error(session, "write", &broken, Some("missing field `content`"));
+        }
+        assert_eq!(
+            prior_malformed(session, "write", &broken),
+            MALFORMED_CALL_LIMIT
+        );
+        // Same tool, corrected arguments: a different key, so unaffected.
+        assert_eq!(
+            prior_malformed(session, "write", &fixed),
+            0,
+            "a corrected call must not inherit the broken call's streak"
+        );
+        clear_session(session);
+    }
+
+    /// The two tiers must not eat into each other's budget: a couple of typos
+    /// followed by a real execution failure should still hit the runtime limit
+    /// on schedule, and vice versa.
+    #[test]
+    fn malformed_and_runtime_tiers_have_separate_budgets() {
+        let session = "test-guard-tier-budgets";
+        let input = json!({"command": "boom"});
+        record_malformed_with_error(session, "bash", &input, Some("missing field `command`"));
+        assert_eq!(prior_failures(session, "bash", true, &input), 0);
+        assert_eq!(prior_malformed(session, "bash", &input), 1);
+        // A malformed streak must not pre-satisfy the runtime limit.
+        record_failure(session, "bash", true, &input);
+        assert_eq!(prior_failures(session, "bash", true, &input), 1);
+        assert_eq!(prior_malformed(session, "bash", &input), 1);
+        // Success clears both.
+        record_success(session, "bash", &input);
+        assert_eq!(prior_failures(session, "bash", true, &input), 0);
+        assert_eq!(prior_malformed(session, "bash", &input), 0);
+        clear_session(session);
+    }
+
+    /// The last malformed error is kept so the refusal can quote what actually
+    /// went wrong instead of a bare "change your arguments".
+    #[test]
+    fn malformed_errors_are_quoted_for_refusals() {
+        let session = "test-guard-malformed-quote";
+        let input = json!({});
+        assert_eq!(last_error(session, "write", true, &input), None);
+        record_malformed_with_error(session, "write", &input, Some("missing field `file_path`"));
+        assert_eq!(
+            last_error(session, "write", true, &input).as_deref(),
+            Some("missing field `file_path`")
+        );
+        clear_session(session);
+        assert_eq!(last_error(session, "write", true, &input), None);
     }
 
     #[test]
     fn limits_are_the_documented_values() {
         assert_eq!(IDENTICAL_FAILURE_LIMIT, 2);
         assert_eq!(UNKNOWN_NAME_LIMIT, 1);
+        assert_eq!(MALFORMED_CALL_LIMIT, 3);
     }
 
     #[test]

@@ -165,6 +165,54 @@ Claim "type restricted"         → upload a non-image, check how it is served
 Claim "path is generated"       → does the stored path reflect my input?
 ```
 
+### Upload filter bypass — the MIME-type trap
+
+This is the single most common false negative in file-upload testing,
+and it is not a scanner limitation — it is a **tooling** limitation.
+
+**The trap:** `curl -F "file=@shell.png"` sends
+`Content-Type: application/octet-stream` on the part, even though the
+file is a valid PNG. The server-side MIME filter reads the part's
+`Content-Type` header and rejects it. The upload *looks* like it should
+work — the file is a real PNG — but the filter sees octet-stream.
+
+**The fix is manual multipart construction with an explicit
+Content-Type on the part:**
+```bash
+# WRONG: curl -F sends application/octet-stream, filter rejects
+curl -s -X POST https://target.com/api/upload -F "file=@shell.png"
+
+# RIGHT: explicit Content-Type on the part boundary
+curl -s -X POST https://target.com/api/upload \
+  -H "Content-Type: multipart/form-data; boundary=----BOUNDARY" \
+  -d $'------BOUNDARY\r\nContent-Disposition: form-data; name="file"; filename="shell.png"\r\nContent-Type: image/png\r\n\r\n<binary>\r\n------BOUNDARY--\r\n'
+```
+
+For binary payloads, write the body to a file and use `--data-binary`:
+
+```bash
+{
+  printf '------BOUNDARY\r\n'
+  printf 'Content-Disposition: form-data; name="file"; filename="test.png"\r\n'
+  printf 'Content-Type: image/png\r\n\r\n'
+  cat test.png
+  printf '\r\n------BOUNDARY--\r\n'
+} > body.bin
+curl -s -X POST https://target.com/api/upload \
+  -H "Content-Type: multipart/form-data; boundary=----BOUNDARY" \
+  --data-binary @body.bin
+```
+
+**Test the filter with a valid image first.** If a real PNG is rejected
+as octet-stream, the filter is checking the part header, not the file
+content. If a real PNG is accepted, the filter is checking content —
+then test with a non-image named `.png`.
+
+**The lesson:** never trust a tool's file upload helper. If the first
+upload fails with a valid image, assume the tool is sending the wrong
+MIME type and construct the request manually before concluding the
+filter works.
+
 ### Error handling
 ```
 Claim "errors are safe"          → force a 500, look for stack traces / paths

@@ -249,6 +249,79 @@ SAFETY
 
 ---
 
+## PHASE 5 — DESTRUCTIVE TESTING WITH RESTORATION
+
+Write access is where the severity lives, and write access testing is
+inherently destructive. This section governs every write test.
+
+**The rule: every destructive action must be reversible, or it must not
+happen.** A finding that costs the owner unrecoverable data is not a
+finding — it is an incident.
+
+### The restoration protocol
+
+Before any write test, for each endpoint class:
+
+```
+1. CAN I CREATE IT?      Is there a create endpoint for this object type?
+2. WILL THE ID BE GUESSABLE?  Sequential, UUID, or predictable?
+3. CAN I DELETE IT?      Does a delete endpoint exist and does my role own it?
+4. IF I CANNOT RESTORE, DO NOT TOUCH IT.
+```
+
+Record the answers in the assessment notes. If any answer is "no",
+the object type is off-limits for destructive testing.
+
+### The test-artifact pattern
+
+Never test writes against production data. Always:
+
+1. **Create a test artifact** with a name that identifies it as yours
+   (e.g. `alphacode-test-<timestamp>`).
+2. **Perform the write test on the artifact.**
+3. **Delete the artifact immediately.**
+4. **Verify deletion by re-querying the API** — do not trust the delete
+   response. A 204 from the delete endpoint does not mean the object is
+   gone. Query the list endpoint and the object endpoint to confirm.
+
+### What is never acceptable
+
+```
+X Deleting a production object to prove DELETE works
+X Modifying a production record's content
+X Creating objects that persist beyond the assessment
+X Bulk operations (delete all, mass-update) — one object only
+X Testing delete on an object type with no create endpoint
+```
+
+### Unrecoverable damage — acknowledge it
+
+Sometimes the create endpoint exists but the delete endpoint does not,
+or the object is deleted but the ID is unrecoverable (no
+create-subcategory endpoint, no create-banner endpoint). **In that
+case:**
+
+1. Stop immediately — do not create or delete anything else.
+2. Record exactly what was affected and whether it is recoverable.
+3. Report it honestly: "During testing, sub-category 1 was deleted.
+   The create endpoint for sub-categories was not available, so it could
+   not be restored. Category 3 was recreated as id 15. Banner 1 is
+   unrecoverable."
+
+An honest damage report is worth more than a clean report that hid
+the damage. The owner needs to know what happened.
+
+### The compound risk of unauthenticated writes + CORS
+
+When an API accepts writes without authentication AND returns
+`Access-Control-Allow-Origin: *`, the finding is no longer "the API is
+broken" — it is "any website on the internet can make authenticated
+admin calls against this API." Note this in the report as a compound
+risk. It is the difference between a Critical that one team fixes and
+a Critical that gets a security advisory.
+
+---
+
 ## THE SHARPEST VERSION OF THIS SKILL
 
 ```

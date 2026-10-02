@@ -117,19 +117,10 @@ fn normalize_assetfinder_input(input: &Value) -> Result<AssetfinderInput> {
     if let Ok(params) = serde_json::from_value::<AssetfinderInput>(input.clone()) {
         return Ok(params);
     }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "assetfinder expects a JSON object with `domain`, e.g. {{\"domain\": \"example.com\"}}"
-        )
-    })?;
-    let domain = ["domain", "target", "host", "d"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("missing field `domain`. Provide the base domain as `domain`.")
-        })?;
+    let domain = super::coerce_host_arg(input, "assetfinder", "domain")?;
+    // Remaining options are optional; a payload that was a bare host string has
+    // no object to read them from, so an empty map stands in for the defaults.
+    let obj = input.as_object().cloned().unwrap_or_default();
     Ok(AssetfinderInput {
         domain: domain.to_string(),
         subs_only: obj

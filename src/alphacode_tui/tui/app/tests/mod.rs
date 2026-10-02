@@ -78,8 +78,64 @@ pub mod tests {
         app
     }
 
+    /// A stub that models the one provider capability the fast-mode tests
+    /// exercise.
+    ///
+    /// `create_test_app_inner`'s `StubProvider` inherits the trait's default
+    /// `set_service_tier`, which returns `Err("This provider does not support
+    /// service tier switching")`. `save_openai_fast_setting_local` discards that
+    /// error with `let _ =`, so the config was written correctly while the
+    /// in-memory provider kept reporting `None` — and the test failed on the
+    /// session half of the behaviour with no indication of why. A stub that
+    /// supports the feature is the only honest way to test that it is applied.
+    struct FastProvider {
+        service_tier: Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::alphacode_provider_core::Provider for FastProvider {
+        async fn complete(
+            &self,
+            _messages: &[crate::alphacode_message_types::Message],
+            _tools: &[crate::alphacode_message_types::ToolDefinition],
+            _system: &str,
+            _resume_session_id: Option<&str>,
+        ) -> Result<crate::alphacode_provider_core::EventStream> {
+            unimplemented!("FastProvider")
+        }
+        fn name(&self) -> &str {
+            "fast-stub"
+        }
+        fn model(&self) -> String {
+            "stub-model".to_string()
+        }
+        fn fork(&self) -> Arc<dyn crate::alphacode_provider_core::Provider> {
+            Arc::new(Self {
+                service_tier: Arc::clone(&self.service_tier),
+            })
+        }
+        fn service_tier(&self) -> Option<String> {
+            self.service_tier.lock().unwrap().clone()
+        }
+        fn set_service_tier(&self, service_tier: &str) -> Result<()> {
+            *self.service_tier.lock().unwrap() = Some(service_tier.to_string());
+            Ok(())
+        }
+    }
+
     fn create_fast_test_app() -> App {
-        create_test_app_inner()
+        ensure_test_alphacode_home_if_unset();
+        clear_persisted_test_ui_state();
+        crate::alphacode_tui::tui::ui::clear_test_render_state_for_tests();
+        let provider = Arc::new(FastProvider {
+            service_tier: Arc::new(std::sync::Mutex::new(None)),
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
+        let mut app = App::new_for_test_harness(provider, registry);
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+        app
     }
 
     struct SwitchableProvider {

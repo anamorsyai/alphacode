@@ -2773,15 +2773,13 @@ impl App {
             return false;
         }
 
-        let provider_config = &crate::config::config().provider;
-        let has_explicit_default = provider_config
-            .default_provider
-            .as_deref()
-            .is_some_and(|provider| !provider.trim().is_empty())
-            || provider_config
-                .default_model
-                .as_deref()
-                .is_some_and(|model| !model.trim().is_empty());
+        // Ask the file, not the parsed config. `ProviderConfig::default` ships a
+        // default model and provider, and `#[serde(default)]` restores them for
+        // any key the user removed, so a config with no explicit default parses
+        // to `Some("kilo-auto/free")` and reads here as a deliberate choice. The
+        // result would be that onboarding never prefers the strongest model for
+        // a first-run user — the exact case this is meant to cover.
+        let has_explicit_default = crate::config::Config::has_explicit_provider_defaults();
         let runtime_provider_explicit = std::env::var("ALPHACODE_INITIAL_PROVIDER_EXPLICIT")
             .ok()
             .is_some_and(|value| {

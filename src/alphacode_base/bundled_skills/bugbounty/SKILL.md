@@ -356,6 +356,39 @@ comment injection (SEL/**/ECT), parameter pollution
 Do not build an evasion ladder. Sustained filter bypass is out of scope for a
 review engagement and puts the owner at risk.
 
+---
+
+## REAL-WORLD LESSONS — THE PATTERNS THAT ACTUALLY PAY OUT
+
+These are cross-cutting patterns observed across multiple engagements. Each
+one is detailed in its specific skill; this section is the index.
+
+| # | Lesson | Skill |
+|---|--------|-------|
+| 1 | **JS bundle is the highest-yield first step.** Every API endpoint, auth config, and sometimes hardcoded secrets live in frontend JS. Analyse it before any wordlist. Chain the chunks — endpoints live in lazy-loaded bundles too. | `recon-js` |
+| 2 | **`alg:none` JWT bypass is trivial to test.** `jwt forge --algorithm none` produces a valid token in one call. Run it on every token-bearing endpoint — it is the cheapest highest-severity test in the arsenal. | `hunt-jwt` |
+| 3 | **Small wordlists win.** A 47-word list built from company vocabulary cracked an 8-digit numeric admin password in seconds. Try the 5 default credentials first, then a <100-word target-derived list. | `credential-attack` |
+| 4 | **`curl -F` sends `application/octet-stream`.** The server-side MIME filter sees this even for valid images. Manual multipart with an explicit `Content-Type` on the part is required to test upload filters honestly. | `control-verification` |
+| 5 | **Every destructive action must be reversible.** Create a test artifact, test on it, delete it, then **verify deletion by re-querying the API** — do not trust the 204. If you cannot restore it, do not touch it, and report the damage honestly. | `manual-blackbox` |
+| 6 | **CORS `*` + unauthenticated API = full data breach from any malicious website.** This compound risk turns a broken API into a security advisory. | `manual-blackbox` |
+| 7 | **`grep -oE` with `-` mid-class fails silently.** A null grep result looks like "no endpoints found". Verify on a known-good line before trusting it. | `recon-js` |
+| 8 | **Windows `cmd.exe` interprets `&` in URLs.** Write URLs to files or use env vars to avoid shell parsing issues. | (general) |
+| 9 | **A clean target is a good result.** One of three targets had zero findings after thorough testing. That is a deliverable. | `manual-blackbox` |
+| 10 | **Rate-limit behaviour is the finding, not an obstacle.** Record the threshold; do not try to defeat it. | `credential-attack` |
+
+### The highest-yield sequence for an unknown SPA
+
+1. Download the JS bundle(s) — all chunks, not just the main one (`recon-js`)
+2. Extract endpoints, auth config, secrets (`recon-js` section 3)
+3. Test bundle-derived endpoints **unauthenticated** first (`hunt-api`)
+4. On any token-bearing endpoint: run the `alg:none` forge test (`hunt-jwt`)
+5. On any login endpoint: try the 5 default credentials (`credential-attack`)
+6. On any upload endpoint: construct multipart manually (`control-verification`)
+7. Maintain the control ledger; kill hypotheses with 3 identical results
+
+This sequence found a full compromise on one of three targets. On the
+other two it produced clean, honest results.
+
 ## REPORTING TEMPLATE
 ```
 ## Title: [Vuln] in [Endpoint] allows [Impact]

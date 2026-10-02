@@ -245,6 +245,12 @@ pub(super) fn is_output_token_limit_error(error: &str) -> bool {
         || lower.contains("too many output tokens")
         || lower.contains("response too long")
         || lower.contains("finish_reason")
+        // Provider phrasings for an output-length cap that do not name
+        // `max_tokens` directly (e.g. "This model's maximum tokens for
+        // completion is 16384").
+        || lower.contains("tokens for completion")
+        || lower.contains("completion is")
+        || lower.contains("tokens allowed")
 }
 
 /// Whether `error` says the input/context window overflowed.

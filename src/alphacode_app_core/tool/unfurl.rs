@@ -129,17 +129,12 @@ fn normalize_unfurl_input(input: &Value) -> Result<UnfurlInput> {
     if let Ok(params) = serde_json::from_value::<UnfurlInput>(input.clone()) {
         return Ok(params);
     }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "unfurl expects a JSON object with `input`, e.g. {{\"input\": \"https://example.com\"}}"
-        )
-    })?;
-    let input_val = ["input", "url", "target", "i"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("missing field `input`. Provide the input as `input`."))?;
+    // `input` is the documented key, but models send `url`/`target` just as
+    // often; both resolve to the same value here.
+    let input_val = super::coerce_url_arg(input, "unfurl")?;
+    // Remaining options are optional; a payload that was a bare URL string has
+    // no object to read them from, so an empty map stands in for the defaults.
+    let obj = input.as_object().cloned().unwrap_or_default();
     Ok(UnfurlInput {
         input: input_val.to_string(),
         mode: obj

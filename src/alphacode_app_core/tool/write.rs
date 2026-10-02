@@ -6,7 +6,6 @@ use super::{Tool, ToolContext, ToolOutput};
 use crate::alphacode_app_core::bus::{Bus, BusEvent, FileOp, FileTouch};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -18,65 +17,75 @@ impl WriteTool {
     }
 }
 
-#[derive(Deserialize)]
+/// `intent` is only ever carried through to the file-touch event, so the two
+/// fields that matter are recovered by the shared coercion ladder in
+/// `execute` rather than by a single-shot `from_value`.
 struct WriteInput {
-    #[serde(default)]
     intent: Option<String>,
-    #[serde(
-        alias = "path",
-        alias = "file",
-        alias = "filename",
-        alias = "file_name"
-    )]
     file_path: String,
-    #[serde(alias = "text", alias = "data", alias = "body", alias = "file_content")]
     content: String,
 }
 
-/// Alias-aware extraction so a model that sends `path`/`text` (instead of
-/// `file_path`/`content`) gets its file written instead of a bare
-/// "missing field" failure that it then repeats until the repeat guard
-/// refuses the call.
-fn extract_write_input(input: &Value) -> Result<WriteInput, anyhow::Error> {
-    if let Ok(params) = serde_json::from_value::<WriteInput>(input.clone()) {
-        return Ok(params);
-    }
-    let obj = input.as_object().ok_or_else(|| {
-        anyhow::anyhow!(
-            "write expects a JSON object with `file_path` and `content`, e.g. \
-             {{\"file_path\": \"/path/to/file\", \"content\": \"...\"}}"
-        )
-    })?;
-    let file_path = ["file_path", "path", "file", "filename", "file_name"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "missing field `file_path`. {}. \
-                 Provide the destination as `file_path`, e.g. \
-                 {{\"file_path\": \"/path/to/file\", \"content\": \"...\"}}",
-                super::describe_received_arguments(input)
-            )
-        })?;
-    let content = ["content", "text", "data", "body", "file_content"]
-        .iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_str()))
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "missing field `content` for file `{file_path}`. \
-                 Provide the file body as `content`, e.g. \
-                 {{\"file_path\": \"{file_path}\", \"content\": \"...\"}}"
-            )
-        })?;
-    let intent = obj
-        .get("intent")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    Ok(WriteInput {
-        intent,
-        file_path: file_path.to_string(),
-        content: content.to_string(),
-    })
+/// Whether the argument stream was cut short and the payload rebuilt from
+/// what survived.
+///
+/// A `write` body is the single most likely argument in a session to exceed
+/// the provider's `max_tokens`, so this is not a rare corner. When it happens
+/// the recovered content is a *prefix* of what the model meant to write, and
+/// the distinction matters: writing a prefix to a new file loses nothing, but
+/// writing one over an existing file destroys content that cannot be
+/// recovered. The second case is refused rather than performed.
+fn input_was_truncated(input: &Value) -> bool {
+    input
+        .get(crate::alphacode_message_types::TRUNCATED_INPUT_MARKER)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Whether the payload carried a `content` field under any accepted spelling.
+///
+/// Used to tell "the model asked for an empty file" apart from "the model
+/// forgot the body". The two are very different: one is a completed request,
+/// the other is a mistake worth reporting.
+fn input_has_content_field(input: &Value) -> bool {
+    [
+        "content",
+        "text",
+        "data",
+        "body",
+        "file_content",
+        "contents",
+        "new_content",
+        "newContent",
+    ]
+    .iter()
+    .any(|key| input.get(*key).and_then(Value::as_str).is_some())
+}
+
+/// The error for a `write` whose arguments were cut off before the body arrived.
+///
+/// Distinct from [`missing_content_error`] because the fix is different. The
+/// model did send a body; it was truncated by the provider's output token
+/// limit. Told only "missing field `content`", it resends the identical
+/// oversized call — which truncates again, which is the loop the repeat guard
+/// eventually has to break.
+fn truncated_body_error(file_path: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "Nothing was written to `{file_path}`: this call's arguments were cut off by the output \
+         token limit before `content` finished arriving, so only a prefix (possibly empty) was \
+         recoverable and a prefix was not written. Re-send the file in smaller pieces — `write` \
+         an initial chunk, then extend it with `edit` — rather than resending the identical \
+         oversized call."
+    )
+}
+
+/// The error for a `write` that named its destination but not its body.
+fn missing_content_error(file_path: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "missing field `content` for file `{file_path}`. \
+         Provide the file body as `content`, e.g. \
+         {{\"file_path\": \"{file_path}\", \"content\": \"...\"}}"
+    )
 }
 
 #[async_trait]
@@ -108,7 +117,73 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let params: WriteInput = extract_write_input(&input)?;
+        // Captured before `extract_write_input` normalizes the payload away.
+        let salvaged = input_was_truncated(&input);
+        // `file_path` is recovered first so a payload that named the file under
+        // an alias — or arrived as a truncated stream — reaches the content
+        // lookup with the destination known. Without the path, the old
+        // single-shot `from_value` failed with "missing field `file_path`" and
+        // the model retried the identical call until the repeat guard fired.
+        let file_path = super::coerce_text_arg(
+            &input,
+            "write",
+            "file_path",
+            &[
+                "path",
+                "file",
+                "filename",
+                "file_name",
+                "filePath",
+                "filepath",
+                "file-path",
+                "dest",
+                "destination",
+            ],
+        )?;
+        // No single-string fallback here, unlike the path lookup above. `write` takes
+        // two text arguments from one payload, so "the only string field is
+        // `file_path`" means the body is *missing* — and adopting the path as
+        // the content would write a file containing its own path. The path is
+        // excluded from the search too, so `{"file_path": "a.rs", "text": "x"}`
+        // cannot pick up the wrong one.
+        let content = super::coerce_text_field(
+            &input,
+            "write",
+            "content",
+            &[
+                "text",
+                "data",
+                "body",
+                "file_content",
+                "contents",
+                "new_content",
+                "newContent",
+            ],
+            false,
+            super::PATH_EXAMPLE,
+        )
+        // An empty file is a legitimate request, so only a genuinely absent
+        // field is an error — and it must name the file, not just the field.
+        .or_else(|_| {
+            if input_has_content_field(&input) {
+                Ok(String::new())
+            } else if salvaged {
+                // The call *did* name the file; the body was cut off. Say so,
+                // because the generic "missing field `content`" is what the
+                // model has already seen once and will simply retry verbatim.
+                Err(truncated_body_error(&file_path))
+            } else {
+                Err(missing_content_error(&file_path))
+            }
+        })?;
+        let params = WriteInput {
+            intent: input
+                .get("intent")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            file_path,
+            content,
+        };
 
         let path = ctx.resolve_path_guarded(Path::new(&params.file_path))?;
 
@@ -117,6 +192,29 @@ impl Tool for WriteTool {
             && !parent.exists()
         {
             tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let existed = path.exists();
+        // Refuse to replace real content with a truncated prefix. Everything
+        // that survived the cutoff is already on disk nowhere else, so this
+        // has to fail loudly rather than guess. Writing the prefix to a *new*
+        // file is safe and worth doing — the model reads its own output, sees
+        // the warning, and continues the file on the next call.
+        if salvaged && existed {
+            let existing = tokio::fs::metadata(&path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if existing > 0 {
+                return Err(anyhow::anyhow!(
+                    "Refusing to overwrite the existing {existing}-byte file `{}`: this call's \
+                     arguments were cut off by the output token limit, so the recovered `content` is \
+                     only a prefix. Nothing was written. Re-send `write` with a shorter `content` \
+                     (or use `edit` to apply the change in pieces) so the file is not left \
+                     half-written.",
+                    params.file_path
+                ));
+            }
         }
 
         // Check if file existed before and read old content for diff.
@@ -128,7 +226,6 @@ impl Tool for WriteTool {
         // the file is past the point where the diff would be truncated anyway.
         // The size is checked from metadata first, so the content is never
         // loaded in the first place.
-        let existed = path.exists();
         let old_content = if existed && file_within_diff_size_limit(&path).await {
             tokio::fs::read_to_string(&path).await.ok()
         } else {
@@ -175,9 +272,24 @@ impl Tool for WriteTool {
             detail,
         }));
 
+        // Only reachable with `salvaged == true` when the target did not exist,
+        // because the overwrite case is refused above. Lead with the warning:
+        // the model reads this output, and it needs to know the file is a
+        // prefix rather than the finished article.
+        let warning = if salvaged {
+            format!(
+                "WARNING: this call's arguments were truncated by the output token limit, so only \
+                 the first {} bytes of `content` were recovered. This file is INCOMPLETE — read it, \
+                 then continue writing the remainder with `edit` or a follow-up `write`.\n",
+                params.content.len()
+            )
+        } else {
+            String::new()
+        };
+
         if existed {
             Ok(ToolOutput::new(format!(
-                "Updated {} ({} lines){}\n{}",
+                "{warning}Updated {} ({} lines){}\n{}",
                 params.file_path,
                 line_count,
                 if diff.is_empty() { "" } else { ":" },
@@ -195,7 +307,7 @@ impl Tool for WriteTool {
                 )
             };
             Ok(ToolOutput::new(format!(
-                "Created {} ({} lines):\n{}",
+                "{warning}Created {} ({} lines):\n{}",
                 params.file_path, line_count, diff
             ))
             .with_title(params.file_path.clone()))
@@ -206,6 +318,79 @@ impl Tool for WriteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    /// Recover the body the same way `execute` does, without touching the
+    /// filesystem.
+    fn recovered_content(input: &Value) -> Result<String> {
+        super::super::coerce_text_field(
+            input,
+            "write",
+            "content",
+            &[
+                "text",
+                "data",
+                "body",
+                "file_content",
+                "contents",
+                "new_content",
+                "newContent",
+            ],
+            false,
+            super::super::PATH_EXAMPLE,
+        )
+    }
+
+    /// A bodyless `write` must be reported as a missing body, not satisfied
+    /// with the destination.
+    ///
+    /// `coerce_text_arg`'s single-string fallback is right for tools that take
+    /// one text argument, but `write` takes two. Given the surviving half of a
+    /// truncated payload — exactly one string field, `file_path` — the fallback
+    /// handed back `"src/main.rs"` as the *content*, and the tool wrote a file
+    /// containing its own path, with a success message.
+    #[test]
+    fn a_bodyless_write_is_not_given_its_own_path_as_the_body() {
+        for input in [
+            json!({"file_path": "src/main.rs"}),
+            json!({"path": "src/main.rs"}),
+            json!({"file_path": "src/main.rs", "intent": "add a helper"}),
+        ] {
+            assert!(
+                recovered_content(&input).is_err(),
+                "the path was adopted as the body for {input}"
+            );
+        }
+    }
+
+    /// A body that *is* present must still be found under every accepted
+    /// spelling, and never confused with the path sitting next to it.
+    #[test]
+    fn a_present_body_is_found_under_every_spelling() {
+        for key in [
+            "content",
+            "text",
+            "data",
+            "body",
+            "file_content",
+            "contents",
+            "new_content",
+            "newContent",
+        ] {
+            let input = json!({"file_path": "src/main.rs", key: "fn main() {}"});
+            assert_eq!(
+                recovered_content(&input).unwrap(),
+                "fn main() {}",
+                "body not found under {key}"
+            );
+        }
+        // Two string fields and no recognised body key: still an error, because
+        // guessing between them would write one of them.
+        assert!(
+            recovered_content(&json!({"file_path": "a.rs", "whatever": "x"})).is_err(),
+            "an unrecognised field was adopted as the body"
+        );
+    }
 
     #[test]
     fn test_generate_diff_summary_single_change() {
@@ -284,5 +469,145 @@ mod tests {
         let diff = generate_diff_summary(old, new);
 
         assert!(diff.is_empty(), "No changes should produce empty diff");
+    }
+
+    // ── Input recovery ─────────────────────────────────────────────────────
+    //
+    // Every one of these used to fail with a bare "missing field `file_path`"
+    // or "missing field `content`", which the model then retried byte-for-byte
+    // until the repeat guard blocked the call.
+
+    #[test]
+    fn recovers_the_path_from_the_shapes_models_emit() {
+        let path_of = |input: &Value| {
+            crate::alphacode_app_core::tool::coerce_text_arg(
+                input,
+                "write",
+                "file_path",
+                &[
+                    "path",
+                    "file",
+                    "filename",
+                    "file_name",
+                    "filePath",
+                    "filepath",
+                    "file-path",
+                    "dest",
+                    "destination",
+                ],
+            )
+        };
+        // Documented key.
+        assert_eq!(
+            path_of(&json!({"file_path": "a.rs", "content": "x"})).unwrap(),
+            "a.rs"
+        );
+        // Path aliases.
+        for key in [
+            "path",
+            "file",
+            "filename",
+            "file_name",
+            "filePath",
+            "filepath",
+            "file-path",
+            "dest",
+            "destination",
+        ] {
+            assert_eq!(
+                path_of(&json!({ key: "a.rs", "content": "x" })).unwrap(),
+                "a.rs",
+                "path alias {key} rejected"
+            );
+        }
+        // A bare string is a path, not a body: a bare string cannot carry
+        // content, and inventing one here would be the worst possible guess.
+        assert_eq!(path_of(&json!("a.rs")).unwrap(), "a.rs");
+        assert_eq!(path_of(&json!([{"file_path": "a.rs"}])).unwrap(), "a.rs");
+        // And a payload with nothing path-shaped is an error that names what
+        // arrived.
+        assert!(path_of(&json!({"depth": 3})).is_err());
+    }
+
+    #[test]
+    fn a_missing_content_field_names_the_file() {
+        let err = missing_content_error("src/main.rs").to_string();
+        assert!(err.contains("missing field `content`"), "{err}");
+        // Naming the destination is what lets the model fix the call without
+        // re-reading the file list.
+        assert!(err.contains("src/main.rs"), "{err}");
+    }
+
+    /// Writing an empty file is a legitimate request, so a present-but-empty
+    /// `content` must not be reported as missing.
+    #[test]
+    fn an_explicitly_empty_content_field_is_valid() {
+        assert!(!input_has_content_field(&json!({"file_path": "a.rs"})));
+        assert!(input_has_content_field(
+            &json!({"file_path": "a.rs", "content": ""})
+        ));
+        assert!(input_has_content_field(
+            &json!({"file_path": "a.rs", "text": ""})
+        ));
+    }
+
+    /// The truncation marker is what lets `write` tell a salvaged call from a
+    /// complete one. A well-formed payload must never carry it, or every
+    /// subsequent write to an existing file would be refused.
+    #[test]
+    fn a_complete_payload_is_not_marked_as_truncated() {
+        assert!(!input_was_truncated(&json!({
+            "file_path": "a.rs", "content": "x"
+        })));
+        assert!(input_was_truncated(&json!({
+            "file_path": "a.rs",
+            "content": "prefix",
+            crate::alphacode_message_types::TRUNCATED_INPUT_MARKER: true
+        })));
+        // A marker that is present but false is not a truncation.
+        assert!(!input_was_truncated(&json!({
+            "file_path": "a.rs",
+            crate::alphacode_message_types::TRUNCATED_INPUT_MARKER: false
+        })));
+    }
+
+    /// The truncated-stream shape end to end: the path survives, the body does
+    /// not, the call is refused rather than satisfied with the path, and
+    /// nothing is written.
+    ///
+    /// This is the combination the two fixes exist for. Recovering the path is
+    /// what lets the error name the file, and refusing the missing body is what
+    /// stops `{"file_path": "a.rs"}` from becoming a file containing `"a.rs"`.
+    #[test]
+    fn a_truncated_payload_reports_the_file_it_could_not_finish_writing() {
+        let recovered = crate::alphacode_message_types::ToolCall::parse_streamed_input_to_object(
+            r#"{"file_path": "src/lib.rs", "content": "pub fn truncated"#,
+        );
+        assert!(input_was_truncated(&recovered), "marker not stamped");
+        // The path is recoverable, which is what makes the error actionable.
+        let path = super::super::coerce_text_arg(&recovered, "write", "file_path", &["path"])
+            .expect("the surviving path is recovered");
+        assert_eq!(path, "src/lib.rs");
+        // The body is not, and the raw coercion must fail rather than fall back
+        // to the only string in the payload.
+        assert!(
+            recovered_content(&recovered).is_err(),
+            "the path was adopted as the body"
+        );
+        // The error the caller surfaces names the file and says the arguments
+        // were cut off, so the model does not resend the identical call.
+        let err = truncated_body_error(&path).to_string();
+        assert!(
+            err.contains("src/lib.rs"),
+            "the error does not name the file: {err}"
+        );
+        assert!(err.contains("cut off"), "the error does not say why: {err}");
+        // And the internal marker is never shown to the model as one of its own
+        // keys, which would invite it to start supplying it.
+        let described = super::super::describe_received_arguments(&recovered);
+        assert!(
+            !described.contains(crate::alphacode_message_types::TRUNCATED_INPUT_MARKER),
+            "the truncation marker leaked into the error: {described}"
+        );
     }
 }

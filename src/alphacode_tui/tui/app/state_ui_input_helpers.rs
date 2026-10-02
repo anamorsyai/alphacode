@@ -1104,6 +1104,7 @@ impl App {
             return self.rank_suggestions(
                 input,
                 vec![
+                    ("/config ui".into(), "Open the interactive settings overlay"),
                     ("/config init".into(), "Create a default config file"),
                     ("/config create".into(), "Alias for /config init"),
                     ("/config edit".into(), "Open the config file in $EDITOR"),

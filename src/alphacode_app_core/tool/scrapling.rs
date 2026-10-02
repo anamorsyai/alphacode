@@ -25,7 +25,7 @@ impl ScraplingTool {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct ScraplingInput {
     url: String,
     #[serde(default)]
@@ -109,11 +109,19 @@ impl Tool for ScraplingTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let params: ScraplingInput = serde_json::from_value(input)?;
-
-        if !params.url.starts_with("http://") && !params.url.starts_with("https://") {
-            return Err(anyhow::anyhow!("URL must start with http:// or https://"));
-        }
+        // Recovered rather than deserialized, so an alias key or a bare URL
+        // string still reaches the fetch instead of failing with a bare serde
+        // "missing field `url`".
+        let url = super::coerce_url_arg(&input, "scrapling")?;
+        let mut params: ScraplingInput =
+            serde_json::from_value(input.clone()).unwrap_or(ScraplingInput {
+                url: url.clone(),
+                ..Default::default()
+            });
+        // `coerce_url_arg` accepts a scheme-less host, but this tool's
+        // downstream stages need an absolute URL, so require the scheme
+        // explicitly rather than promoting `example.com` to a request.
+        params.url = url;
 
         // `0` means "unset": forwarding it gave the Python subprocess a zero
         // timeout and failed every fetch immediately.

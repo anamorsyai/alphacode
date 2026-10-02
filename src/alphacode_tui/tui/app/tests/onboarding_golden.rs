@@ -230,7 +230,7 @@ fn onboarding_golden_walks_every_phase() {
         let app = app_in_phase(OnboardingPhase::Suggestions);
         let text = render_onboarding_text(&app, width, height);
         dump("Suggestions", &text);
-        assert!(text.contains("Welcome to alphacode onboarding"), "{text}");
+        assert!(text.contains("Welcome to alphacode"), "{text}");
     }
 }
 
@@ -256,7 +256,7 @@ fn onboarding_golden_walks_failure_and_async_states() {
     // Helper: assert the shared polish invariants for a guided screen.
     let assert_guided_polish = |title: &str, text: &str| {
         assert!(
-            text.contains("Welcome to alphacode onboarding"),
+            text.contains("Welcome to alphacode"),
             "{title}: must render the welcome title\n{text}"
         );
         assert!(

@@ -1,0 +1,131 @@
+name: build-alpine
+
+# Alpine (musl) aarch64 build — runs the agent on AlpineTerm / postmarketOS /
+# any musl-based Linux where the glibc release artifacts refuse to start.
+#
+# Why a container: the glibc builds in release.yml link against the runner's
+# glibc (2.35 on ubuntu-22.04), which Alpine does not have. Building inside an
+# alpine:3.22 image produces a musl-linked binary with the same libxkbcommon
+# runtime dep the glibc artifacts already have (Alpine ships libxkbcommon).
+#
+# Native-only link deps on Linux (verified against Cargo.lock): libxkbcommon
+# (via xa11y-linux -> xkbcommon FFI). Everything else — ring, zbus, x11rb,
+# evdev, wl-clipboard-rs, resvg, image — is pure Rust, so no cmake/go/perl
+# toolchain is needed here.
+#
+# Artifacts: alphacode-linux-musl-aarch64.tar.gz (+ .sha256). Tag pushes also
+# attach the files to the release next to the glibc ones; the names never
+# collide with release.yml's alphacode-linux-arm64.tar.gz.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fetch git dependencies (agentgrep) with the git CLI instead of libgit2.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  build-alpine:
+    name: musl aarch64 (alpine 3.22)
+    runs-on: ubuntu-22.04-arm
+    container:
+      image: alpine:3.22
+    steps:
+      # First thing: gcompat makes GitHub's glibc-linked node20 runtime work
+      # inside the alpine container, which every JS action (checkout, cache,
+      # upload-artifact) needs. bash/git/build-base are the toolchain basics,
+      # libxkbcommon-dev provides the one non-Rust link-time dependency.
+      - name: Install build dependencies
+        run: |
+          apk add --no-cache \
+            gcompat libgcc libstdc++ nodejs npm \
+            ca-certificates curl git bash \
+            build-base pkgconf \
+            libxkbcommon-dev
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Rust 1.94.1 = the MSRV pinned in rust-toolchain.toml (aws-sdk needs
+      # 1.94.1). Alpine's apk rust is far older, so install via rustup's
+      # static musl rustup-init; rust-toolchain.toml then selects 1.94.1.
+      # Keep this in sync with rust-toolchain.toml.
+      - name: Install Rust 1.94.1 (musl)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --default-toolchain 1.94.1 --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            /github/home/.cargo/registry
+            /github/home/.cargo/git
+            target
+          key: alpine-3.22-musl-aarch64-${{ hashFiles('Cargo.lock') }}
+
+      # Tag builds embed the tag version (matches release.yml); dispatch
+      # builds fall back to the package version from Cargo.toml.
+      - name: Set build version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          echo "ALPHACODE_BUILD_SEMVER=$VERSION" >> "$GITHUB_ENV"
+          echo "ALPHACODE_RELEASE_BUILD=1" >> "$GITHUB_ENV"
+          echo "ALPHACODE_BUILD_GIT_DIRTY=0" >> "$GITHUB_ENV"
+          echo "Building alphacode v$VERSION for aarch64-unknown-linux-musl"
+
+      - name: Build
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release --locked
+
+      # Hard gate: the binary must actually start inside the same container
+      # its runtime deps come from (missing libxkbcommon or a bad musl link
+      # would show up here as a startup failure, not just a link success).
+      - name: Smoke test binary
+        run: ./target/release/alphacode --version
+
+      # Informational: the NEEDED entries should only ever be libxkbcommon
+      # plus libc — any glibc library showing up here means the musl build
+      # silently broke.
+      - name: Show dynamic dependencies
+        run: |
+          readelf -d target/release/alphacode | grep NEEDED || true
+
+      - name: Archive + checksum
+        shell: bash
+        run: |
+          tar -czf alphacode-linux-musl-aarch64.tar.gz -C target/release alphacode
+          sha256sum alphacode-linux-musl-aarch64.tar.gz > alphacode-linux-musl-aarch64.sha256
+          ls -la alphacode-linux-musl-aarch64.*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alphacode-linux-musl-aarch64
+          path: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          if-no-files-found: error
+
+      - name: Attach to release (tag builds only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          fail_on_unmatched_files: false

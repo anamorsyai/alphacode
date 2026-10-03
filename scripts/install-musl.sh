@@ -43,7 +43,11 @@ say "Downloading ..."
 wget -qO "$TMP/archive.tar.gz" "$BASE/$ART.tar.gz" ||
   { say "ERROR: download failed ($BASE/$ART.tar.gz)"; exit 1; }
 if wget -qO "$TMP/checksums" "$BASE/$ART.sha256" 2>/dev/null && [ -s "$TMP/checksums" ]; then
-  (cd "$TMP" && sha256sum -c checksums >/dev/null 2>&1) ||
+  # The checksum file references the artifact's original name; our copy is
+  # archive.tar.gz, so compare the hash directly instead of `sha256sum -c`.
+  EXPECTED=$(awk 'NR==1{print $1}' "$TMP/checksums")
+  ACTUAL=$(sha256sum "$TMP/archive.tar.gz" | awk '{print $1}')
+  [ "$EXPECTED" = "$ACTUAL" ] ||
     { say "ERROR: checksum mismatch — aborting"; exit 1; }
   say "Checksum OK"
 else

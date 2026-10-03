@@ -12,7 +12,11 @@
 #   a missing libxkbcommon or a bad musl link fails the build, not a release.
 set -eux
 
-apk add --no-cache build-base pkgconf libxkbcommon-dev git curl ca-certificates bash
+# libxkbcommon-static: the musl target links fully static (-static -no-pie),
+# so the linker needs libxkbcommon.a, not just the .so from -dev.
+apk add --no-cache build-base pkgconf \
+  libxkbcommon-dev libxkbcommon-static \
+  git curl ca-certificates bash
 
 git config --global --add safe.directory /src
 

@@ -17,7 +17,7 @@ apk add --no-cache build-base pkgconf libxkbcommon-dev git curl ca-certificates 
 git config --global --add safe.directory /src
 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
-  sh -s -- -y --default-toolchain 1.94.1 --profile minimal --no-self-update
+  sh -s -- -y --default-toolchain 1.94.1 --profile minimal
 . "$HOME/.cargo/env"
 
 cargo build --release --locked

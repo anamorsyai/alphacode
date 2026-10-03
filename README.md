@@ -1,415 +1,437 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0F0C29,45:302B63,100:24243E&height=240&section=header&text=AlphaCode&fontSize=68&fontColor=ffffff&animation=fadeIn&fontAlignY=35&desc=Open-Source%20AI%20Coding%20Agent%20%7C%20Browser%20Agent%20%7C%20Desktop%20Automation&descAlignY=55&descSize=17" width="100%">
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0F0C29,45:302B63,100:24243E&height=240&section=header&text=AlphaCode&fontSize=68&fontColor=ffffff&animation=fadeIn&fontAlignY=35&desc=Open-Source%20AI%20Coding%20Agent%20%7C%20Browser%20Agent%20%7C%20Desktop%20Automation&descAlignY=55&descSize=17" width="100%" alt="AlphaCode - open-source AI coding agent with browser and desktop automation">
 
-<br>
+# AlphaCode: the open-source AI coding agent that builds, browses, automates and verifies
 
-<h1>Build. Browse. Automate. Verify.</h1>
+**A free, Rust-native AI coding agent for your terminal. It reads your codebase, edits files, runs commands and tests, drives a real Firefox browser, controls desktop apps, and verifies its own work.**
 
-<p>
-  <strong>AlphaCode is a free, open-source AI coding agent that can understand your project, write code, use your browser, control your desktop, run commands, test changes, and work through complex tasks for you.</strong>
-</p>
+[![GitHub Stars](https://img.shields.io/github/stars/dragonked2/alphacode?style=for-the-badge&label=Stars&labelColor=1a1a2e&color=FFD34D)](https://github.com/dragonked2/alphacode/stargazers)
+[![Latest Release](https://img.shields.io/github/v/release/dragonked2/alphacode?style=for-the-badge&label=Release&labelColor=1a1a2e&color=6E56CF)](https://github.com/dragonked2/alphacode/releases)
+[![MIT License](https://img.shields.io/github/license/dragonked2/alphacode?style=for-the-badge&label=License&labelColor=1a1a2e&color=F5A623)](LICENSE)
+[![Open Issues](https://img.shields.io/github/issues/dragonked2/alphacode?style=for-the-badge&label=Issues&labelColor=1a1a2e&color=FF6B6B)](https://github.com/dragonked2/alphacode/issues)
 
-<p>
-  From a simple question like <code>fix this bug</code> to a complete workflow involving your codebase, Firefox, websites, APIs, files, and desktop applications — AlphaCode is designed to turn natural-language instructions into real actions.
-</p>
+![Windows](https://img.shields.io/badge/Windows-supported-2CBB5D?style=flat-square&logo=windows&logoColor=white&labelColor=1a1a2e)
+![macOS](https://img.shields.io/badge/macOS-supported-2CBB5D?style=flat-square&logo=apple&logoColor=white&labelColor=1a1a2e)
+![Linux](https://img.shields.io/badge/Linux-supported-2CBB5D?style=flat-square&logo=linux&logoColor=white&labelColor=1a1a2e)
+![Rust](https://img.shields.io/badge/Rust-native-DE5D43?style=flat-square&logo=rust&logoColor=white&labelColor=1a1a2e)
+![40+ tools](https://img.shields.io/badge/Agent%20tools-40%2B-6E56CF?style=flat-square&labelColor=1a1a2e)
+![No API key needed](https://img.shields.io/badge/Free%20AI%20lane-no%20API%20key-2CBB5D?style=flat-square&labelColor=1a1a2e)
 
-<br>
-
-<p>
-  <a href="https://github.com/dragonked2/alphacode">
-    <img src="https://img.shields.io/github/stars/dragonked2/alphacode?style=for-the-badge&label=GitHub%20Stars&labelColor=1a1a2e&color=FFD34D" alt="GitHub Stars">
-  </a>
-  <a href="https://github.com/dragonked2/alphacode/releases">
-    <img src="https://img.shields.io/github/v/release/dragonked2/alphacode?style=for-the-badge&label=Latest%20Release&labelColor=1a1a2e&color=6E56CF" alt="Latest Release">
-  </a>
-  <a href="https://github.com/dragonked2/alphacode/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/dragonked2/alphacode?style=for-the-badge&label=License&labelColor=1a1a2e&color=F5A623" alt="MIT License">
-  </a>
-  <a href="https://github.com/dragonked2/alphacode/issues">
-    <img src="https://img.shields.io/github/issues/dragonked2/alphacode?style=for-the-badge&label=Issues&labelColor=1a1a2e&color=FF6B6B" alt="Open Issues">
-  </a>
-</p>
-
-<p>
-  <img src="https://img.shields.io/badge/Windows-supported-2CBB5D?style=flat-square&logo=windows&logoColor=white&labelColor=1a1a2e" alt="Windows supported">
-  <img src="https://img.shields.io/badge/macOS-supported-2CBB5D?style=flat-square&logo=apple&logoColor=white&labelColor=1a1a2e" alt="macOS supported">
-  <img src="https://img.shields.io/badge/Linux-supported-2CBB5D?style=flat-square&logo=linux&logoColor=white&labelColor=1a1a2e" alt="Linux supported">
-  <img src="https://img.shields.io/badge/Rust-native-DE5D43?style=flat-square&logo=rust&logoColor=white&labelColor=1a1a2e" alt="Built with Rust">
-  <img src="https://img.shields.io/badge/AI%20Agent-40%2B%20Tools-6E56CF?style=flat-square&logo=sparkles&logoColor=white&labelColor=1a1a2e" alt="40 plus AI tools">
-  <img src="https://img.shields.io/badge/Free%20AI-No%20API%20Key-2CBB5D?style=flat-square&logo=sparkles&logoColor=white&labelColor=1a1a2e" alt="Free AI with no API key">
-</p>
-
-<br>
-
-<a href="https://github.com/dragonked2/alphacode">
-  <img src="https://img.shields.io/badge/GET%20ALPHACODE-6E56CF?style=for-the-badge&labelColor=0F0C29" alt="Get AlphaCode">
-</a>
+[![Get AlphaCode](https://img.shields.io/badge/GET%20ALPHACODE-6E56CF?style=for-the-badge&labelColor=0F0C29)](#quick-start)
 &nbsp;
-<a href="https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/">
-  <img src="https://img.shields.io/badge/FIREFOX%20BROWSER%20AGENT-FF7139?style=for-the-badge&logo=firefox&logoColor=white" alt="AlphaCode Browser Agent for Firefox">
-</a>
+[![Firefox Browser Agent](https://img.shields.io/badge/FIREFOX%20BROWSER%20AGENT-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)
 
-<br><br>
-
-<a href="#-what-is-alphacode">What is AlphaCode?</a> · <a href="#-browser-agent">Browser Agent</a> · <a href="#-quick-start">Quick Start</a> · <a href="#-features">Features</a> · <a href="#-benchmarks">Benchmarks</a> · <a href="#-desktop-control">Desktop Control</a> · <a href="#-install">Install</a> · <a href="#-faq">FAQ</a>
+[What is AlphaCode?](#what-is-alphacode) ·
+[Quick Start](#quick-start) ·
+[Features](#features) ·
+[Browser Agent](#browser-agent) ·
+[Desktop Control](#desktop-control) ·
+[Swarm Mode](#swarm-mode) ·
+[Providers](#bring-your-own-model) ·
+[Benchmarks](#benchmarks) ·
+[Uninstall](#uninstall) ·
+[FAQ](#faq)
 
 </div>
 
 ---
 
-# 🤖 What is AlphaCode?
+## What is AlphaCode?
 
-**AlphaCode is an open-source AI coding agent built to do more than generate text.**
-
-Instead of only answering questions about your code, AlphaCode can operate inside your development environment and use tools to complete real tasks.
-
-You describe what you want.
-
-AlphaCode investigates.
-
-It plans.
-
-It changes files.
-
-It runs commands.
-
-It uses the web.
-
-It can operate a real Firefox browser.
-
-It can interact with desktop applications.
-
-It can run tests.
-
-It reviews its work.
-
-Then it tells you what happened.
+AlphaCode is an **open-source AI coding agent** that works inside your development environment instead of just chatting about it. Describe a goal in plain English and it investigates, plans, edits files, runs commands, uses the web, operates a real browser, interacts with desktop apps, runs your tests, and reports back with evidence.
 
 ```mermaid
 flowchart LR
-    A["You<br/>Describe a goal"] --> B["Understand<br/>Project + Context"]
-    B --> C["Plan<br/>Choose Actions"]
-    C --> D["Act<br/>Code + Browser + Desktop"]
-    D --> E["Verify<br/>Tests + Evidence"]
-    E --> F["Report<br/>What Changed"]
+    A["You<br/>describe a goal"] --> B["Understand<br/>project + context"]
+    B --> C["Plan<br/>choose actions"]
+    C --> D["Act<br/>code, browser, desktop"]
+    D --> E["Verify<br/>tests + evidence"]
+    E --> F["Report<br/>what changed"]
 ```
 
-### The important difference
+Most AI assistants stop at `You → AI → text`. AlphaCode is built around a loop: **understand → plan → execute → observe → verify**.
 
-AlphaCode is designed as an **execution-oriented AI agent**.
-
-It is not simply:
+Example tasks:
 
 ```text
-You → AI → Text
+Find why the app crashes when users upload a PDF.
+Fix the root cause, add a regression test, run the test suite, and review the final diff.
 ```
-
-It is closer to:
 
 ```text
-You
- ↓
-AlphaCode Agent
- ↓
-Understand → Plan → Execute → Observe → Verify
- ↓
-Code + Terminal + Web + Firefox + Desktop + Tools
- ↓
-Verified result
+Open the site in Firefox, log in with my existing session,
+find the account settings page, check that the new feature is visible,
+and send me a screenshot.
 ```
-
-That means you can give it tasks such as:
 
 ```text
-Find why the application crashes when users upload a PDF.
-Fix the root cause.
-Add a regression test.
-Run the test suite.
-Review the final diff.
+Audit this project for security problems. Trace untrusted input to sensitive operations,
+validate the realistic findings, and tell me which ones are actually reproducible.
 ```
 
-Or:
-
-```text
-Open the website in Firefox.
-Log in using the existing browser session.
-Find the account settings page.
-Check whether the new feature is visible.
-Take a screenshot and report the result.
-```
-
-Or:
-
-```text
-Audit this project for security problems.
-Trace suspicious input flows.
-Identify realistic attack paths.
-Validate the important findings.
-Explain which findings are actually reproducible.
-```
-
-The agent is designed to **work through the task**, rather than simply describe how a human could do it.
+**Who it is for:** beginners can use plain English, developers can give precise technical instructions, and power users can orchestrate multiple agents, skills and MCP servers.
 
 ---
 
-# 🌐 Meet the AlphaCode Browser Agent
+## Quick Start
 
-The **AlphaCode Browser Agent** is the bridge between AlphaCode and a real Firefox browser.
+### 1. Install
 
-It gives AlphaCode the ability to work with an actual browser session instead of treating the web as nothing more than a collection of HTTP responses.
+**macOS / Linux**
 
-### Install the Firefox extension
+```bash
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh | bash
+```
 
-**[Install AlphaCode Browser Agent from Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)**
+**Windows (PowerShell)**
 
-Once the extension and AlphaCode are configured, the agent can interact with browser environments through the AlphaCode browser integration.
+```powershell
+irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex
+```
+
+Prefer to read a script before running it? Download it first, inspect it, then run it. See [Installation](#installation) for pinned versions, PATH options, and building from source.
+
+### 2. Check your setup, then run
+
+```bash
+alphacode doctor    # checks providers, terminal and paths, and tells you what's missing
+alphacode           # launch the terminal UI
+```
+
+No API key is required to start. The built-in free AI lane works out of the box. To use your own provider, run `alphacode login` (see [Bring your own model](#bring-your-own-model)). The first launch shows a short onboarding wizard (telemetry choice, model defaults, key bindings), and every step can be skipped with `Esc`.
+
+### 3. Give it a task
+
+```text
+Explain this project and identify the main entry points.
+```
+
+```text
+Find the biggest bugs, fix the highest-impact one, and run the tests.
+```
+
+Or run a single task non-interactively:
+
+```bash
+alphacode run "fix the failing test"
+```
+
+### 4. (Optional) Connect Firefox
+
+Install the [AlphaCode Browser Agent](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/) extension, then:
+
+```bash
+alphacode browser setup
+alphacode browser status
+```
+
+A healthy setup reports that the browser bridge is available and responding.
+
+---
+
+## Features
+
+| Capability | Details |
+| --- | --- |
+| **Autonomous coding agent** | Natural-language tasks, multi-step planning, self-verification |
+| **File and code tools** | Read, write, targeted edits, multi-edit, patches, code-aware search |
+| **Terminal** | Shell execution with safety controls, background jobs, batching |
+| **Web** | Search, fetch, scraping, HTTP flow analysis |
+| **Real Firefox automation** | DOM, forms, tabs, frames, screenshots, downloads, existing sessions |
+| **Desktop automation** | Windows UI Automation, macOS Accessibility API, Linux AT-SPI2 |
+| **Swarm Mode** | Multiple cooperating agents for decomposable work |
+| **Persistent sessions and memory** | Resume long-running work across terminal restarts |
+| **MCP support** | Connect external tools and services |
+| **Skills** | Reusable, specialized workflows |
+| **Multi-provider** | Anthropic, OpenAI, Gemini, Copilot, OpenRouter, Bedrock, Azure, self-hosted, and more |
+| **Free AI lane** | Start without an API key |
+| **Cross-platform** | Windows, macOS, Linux |
+
+### Work with your code
+
+Read and create files, apply targeted edits and patches, search repositories, trace code paths, run builds and tests, review diffs, and diagnose errors.
+
+### Work with the web
+
+Combine web search and fetching with real browser automation: inspect dynamic pages, interact with web apps, handle forms and browser state, capture screenshots, and assist with QA and security testing.
+
+---
+
+## Browser Agent
+
+The **[AlphaCode Browser Agent](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)** is a Firefox extension that connects AlphaCode to a real Firefox session through native messaging. AlphaCode stays the reasoning and orchestration layer, while Firefox becomes an execution environment.
 
 ```mermaid
 flowchart LR
-    U["You"] --> A["AlphaCode AI Agent"]
-    A --> B["Browser Tool"]
-    B --> C["Native Messaging"]
-    C --> D["AlphaCode Browser Agent"]
+    U["You"] --> A["AlphaCode agent"]
+    A --> B["browser tool"]
+    B --> C["Native messaging"]
+    C --> D["Browser Agent<br/>Firefox extension"]
     D --> F["Real Firefox"]
-    F --> G["Web Page"]
-    G --> H["DOM / Forms / Frames / UI"]
-    H --> D
-    D --> C
-    C --> B
-    B --> A
-    A --> R["Verified Result"]
+    F --> G["Page: DOM, forms,<br/>frames, UI"]
+    G --> D
+    D --> A
+    A --> R["Verified result"]
 ```
 
-## What makes the Browser Agent useful?
+A plain HTTP client fetches HTML. A browser agent **experiences the page the way a user does**, which matters for:
 
-A normal HTTP client can request a page.
-
-A browser agent can **experience the page as a browser**.
-
-That difference matters.
-
-The AlphaCode Browser Agent is intended for workflows involving:
-
-* JavaScript-heavy websites
-* Dynamic interfaces
-* DOM inspection
-* Forms and inputs
-* Buttons and interactive controls
-* Multiple browser tabs
-* Frames and embedded content
+* JavaScript-heavy sites and dynamic interfaces
+* DOM inspection, forms, inputs and interactive controls
+* Multiple tabs, frames and embedded content
 * Existing authenticated browser sessions
-* Scrolling
-* Browser navigation
-* Screenshots
-* Downloads
-* Browser-based testing
-* Web application debugging
-* QA workflows
-* Security testing
-* Repetitive browser tasks
-* Agent-driven web workflows
+* Scrolling, navigation, screenshots and downloads
+* Browser-based testing, QA and web-app debugging
+* Authorized security testing and repetitive browser workflows
 
-### Example
-
-Instead of telling an AI:
-
-> "Here is the HTML. Tell me what I should click."
-
-You can build a workflow where AlphaCode can reason about the live browser environment and perform the appropriate browser actions.
+Instead of pasting HTML into a chat and asking "what should I click?", you can say:
 
 ```text
-User
- │
- ├─ "Open the application"
- │
- ├─ "Check the login flow"
- │
- ├─ "Navigate to the dashboard"
- │
- ├─ "Test the form validation"
- │
- └─ "Report anything suspicious"
- │
- ▼
-AlphaCode
- │
- ├─ Browser navigation
- ├─ Page inspection
- ├─ DOM interaction
- ├─ Form interaction
- ├─ State observation
- ├─ Screenshots
- └─ Verification
- │
- ▼
-Structured result
+Open the application, check the login flow, go to the dashboard,
+test the form validation, and report anything suspicious.
 ```
+
+> **Privacy note:** the agent can act inside your real browser session. Review what it is asked to do, and treat page content as untrusted input.
 
 ---
 
-# 🦊 AlphaCode Browser Agent for Firefox
+## Desktop Control
 
-The Firefox extension is the browser-side component of AlphaCode's browser automation architecture.
+AlphaCode drives native applications through **accessibility APIs** rather than relying only on screen coordinates.
 
-**Get it here:**
+| Platform | Backend |
+| --- | --- |
+| Windows | UI Automation |
+| macOS | Accessibility API |
+| Linux | AT-SPI2 |
 
-**[Mozilla Firefox Add-ons — AlphaCode Browser Agent](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)**
-
-The extension communicates with the local AlphaCode application through Firefox's native messaging architecture.
-
-This allows the browser to act as an execution environment for the AI agent while AlphaCode remains the orchestration and reasoning layer.
-
-### Architecture
+Supported actions include `list_windows`, `snapshot`, `find`, `click`, `type`, `press`, `scroll`, `focus`, `screenshot`, `toggle`, `expand` and `collapse`.
 
 ```text
-┌─────────────────────────────┐
-│           YOU               │
-│      Natural Language       │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│        ALPHACODE            │
-│       AI Agent Core         │
-└──────────────┬──────────────┘
-               │
-       Browser Tool
-               │
-               ▼
-┌─────────────────────────────┐
-│     Native Messaging        │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│  ALPHACODE BROWSER AGENT    │
-│       Firefox Extension     │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│       REAL FIREFOX          │
-│                             │
-│  Tabs • Pages • DOM • UI    │
-│  Forms • Frames • Downloads │
-└─────────────────────────────┘
+Open Calculator, calculate 123 × 456, and read the result.
 ```
+
+AlphaCode finds the app, inspects its accessibility tree, locates the controls, enters the expression, reads the result, and reports `56088`.
 
 ---
 
-# 🧠 Why AlphaCode?
+## Swarm Mode
 
-AlphaCode combines several capabilities that normally require separate tools.
+Large goals can be split across multiple agents working in parallel.
 
-| Capability                      | AlphaCode |
-| ------------------------------- | :-------: |
-| AI coding agent                 |     ✅     |
-| Autonomous task execution       |     ✅     |
-| Natural-language commands       |     ✅     |
-| File editing                    |     ✅     |
-| Terminal / shell                |     ✅     |
-| Web search                      |     ✅     |
-| Web fetching                    |     ✅     |
-| Real Firefox browser automation |     ✅     |
-| Browser DOM interaction         |     ✅     |
-| Desktop automation              |     ✅     |
-| Multi-agent Swarm Mode          |     ✅     |
-| Persistent sessions             |     ✅     |
-| Project memory                  |     ✅     |
-| MCP                             |     ✅     |
-| Security-oriented workflows     |     ✅     |
-| Built-in skills                 |     ✅     |
-| 40+ tools                       |     ✅     |
-| Multiple AI providers           |     ✅     |
-| Free AI lane                    |     ✅     |
-| Windows                         |     ✅     |
-| macOS                           |     ✅     |
-| Linux                           |     ✅     |
+```mermaid
+flowchart TD
+    G["Large goal"] --> P["Planner"]
+    P --> A["Agent A<br/>code analysis"]
+    P --> B["Agent B<br/>security review"]
+    P --> C["Agent C<br/>tests"]
+    P --> D["Agent D<br/>documentation"]
+    A --> M["Coordinator"]
+    B --> M
+    C --> M
+    D --> M
+    M --> R["Review"]
+    R --> F["Final result"]
+```
+
+```text
+/swarm "Analyze this application from architecture, security, testing, and performance perspectives."
+```
+
+Swarm Mode works best on tasks that decompose into independent or semi-independent parts.
 
 ---
 
-# ✨ Built for Humans, Not Just Developers
+## Sessions and Memory
 
-You do not need to learn a complicated agent framework before using AlphaCode.
+Long-running work should survive a closed terminal.
 
-Start with what you want to accomplish.
-
-### Instead of this:
-
-```text
-I need to inspect src/auth/controller.rs,
-trace the request lifecycle,
-identify the failing branch,
-modify the relevant implementation,
-execute cargo test,
-and inspect the resulting diff.
+```bash
+alphacode sessions list        # list saved sessions
+alphacode --resume             # resume the latest session
+alphacode --resume <id>        # resume a specific session
 ```
 
-You can simply say:
-
-```text
-Find and fix the authentication bug.
-Test the fix and show me what changed.
-```
-
-AlphaCode handles the workflow.
-
-### Simple requests
-
-```text
-Explain this project.
-```
-
-```text
-Fix the error I'm getting.
-```
-
-```text
-Make this page look better.
-```
-
-```text
-Find the security problems in this application.
-```
-
-```text
-Run the tests and fix whatever is broken.
-```
-
-```text
-Open the website in Firefox and test the login form.
-```
-
-### More advanced requests
-
-```text
-Audit the authentication system for vulnerabilities,
-trace user-controlled input to sensitive operations,
-validate realistic findings,
-fix the confirmed issues,
-and add regression tests.
-```
-
-The interface grows with you.
-
-**Beginners can start with plain English.**
-
-**Developers can use precise technical instructions.**
-
-**Power users can orchestrate multiple agents and tools.**
+Useful for large codebases, security assessments, long debugging sessions, multi-stage development, research, browser workflows and big refactors.
 
 ---
 
-# 🚀 Quick Start
+## Bring Your Own Model
 
-## 1. Install AlphaCode
+AlphaCode is model-agnostic. Start with the free AI lane, then connect providers when you want to.
+
+| Provider | Auth | Notes |
+| --- | --- | --- |
+| Anthropic (Claude) | OAuth or API key | First-class support |
+| OpenAI (GPT, o-series) | OAuth, API key, ChatGPT browser sign-in | Reasoning, vision and tools |
+| Google Gemini | OAuth or API key | |
+| GitHub Copilot | OAuth | Uses your existing subscription |
+| Cursor | OAuth | Reuses Cursor's session |
+| AWS Bedrock | AWS credentials | Build with `--features bedrock` |
+| Azure | Azure AD or API key | Build with `--features azure-auth` |
+| OpenRouter | API key | Aggregator with a free tier |
+| Any OpenAI-compatible API | API key | `alphacode provider add <name>` |
+| Free AI lane | Built-in | Works out of the box, no key needed |
+
+```bash
+alphacode login                    # interactive provider picker
+alphacode login --provider openai  # sign in to a specific provider
+alphacode provider list            # list providers
+alphacode provider add <name>      # add a custom OpenAI-compatible endpoint
+alphacode provider current         # show the active provider and model
+alphacode model list               # list models
+alphacode model use <model>        # switch model
+```
+
+In the TUI, press `Ctrl+T` to open the model/provider selector.
+
+### Signing in with a provider
+
+Most providers work from an environment variable such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. Run `alphacode login` from your shell, or `/login` inside AlphaCode, for interactive flows.
+
+**OpenAI (Codex OAuth)** needs a local callback listener. AlphaCode serves the redirect on `http://localhost:1455/auth/callback` while you sign in, so make sure port `1455` is free first. If login times out, something else is bound to that port: stop it and run `/login` again.
+
+See the [docs](docs/) for provider flows and troubleshooting.
+
+---
+
+## Built-in Tools
+
+AlphaCode ships with 40+ tools. The core ones:
+
+| Category | Tools |
+| --- | --- |
+| **Files** | `read`, `write`, `edit`, `multiedit`, `patch`, `apply_patch`, `ls` |
+| **Search** | `agentgrep` (code-aware search), `session_search`, `conversation_search` |
+| **Execution** | `bash`, `batch`, `bg` (background jobs) |
+| **Web and browser** | `browser`, `webfetch`, `websearch`, `scrapling`, `httpflow`, `open` |
+| **Desktop** | `desktop` (cross-platform), `macos_computer_use` |
+| **Agent intelligence** | `memory`, `initiative`, `todo`, `plan`, `swarm` |
+| **Utilities** | `doctor`, `self_improve`, `selfdev`, `cron`, `schedule`, `jwt`, `clipboard`, `side_panel`, `discover_tools` |
+
+### Skills and MCP
+
+Skills specialize AlphaCode for different workflows without changing the core agent. Browse them with `/skills`. Examples: `/bugbounty`, `/meme-coin-audit`, `/frontend-design`.
+
+MCP support lets you connect external tools, services and custom integrations, extending the agent beyond its built-in toolset.
+
+---
+
+## Security Testing and Bug Bounty Workflows
+
+Code analysis, HTTP/web tools, browser automation, terminal execution, memory and multi-agent workflows combine into repeatable security-testing pipelines:
+
+```text
+Review the API for insecure direct object references.
+```
+
+```text
+Trace this parameter through the application and determine whether it reaches a dangerous sink.
+```
+
+```text
+Open the authorized test environment in Firefox, test the input validation,
+and document reproducible findings.
+```
+
+> **Only test systems you own or are explicitly authorized to test.**
+
+---
+
+## Safety by Design
+
+An agent that can act needs guardrails. AlphaCode includes:
+
+* Blocking of destructive filesystem and device targets
+* Explicit permission prompts for risky actions
+* Safety controls on all shell execution
+* SSRF and credential-leak heuristics for network operations
+* Tracking of interrupted sessions instead of silent loss
+* Action timeouts and emergency-stop handling for desktop automation
+* Input-state cleanup when operations fail
+* Browser and desktop data treated as potentially untrusted
+
+**AI agents make mistakes.** Review important changes before deploying them. Use `/diff` to inspect everything the agent changed.
+
+---
+
+## Reliability and Quality
+
+**Resilient sessions.** Every conversation is resumable and crash-safe. Panics, signals and dropped SSH connections mark a session as `Crashed` instead of corrupting it, and AlphaCode prints the command to resume it. The transcript is persisted to disk rather than held in memory, so week-long sessions don't bloat the process.
+
+**Coding-quality contract.** On every code-changing turn the agent is instructed to follow four guardrails:
+
+1. **Smallest change.** Never bundle unrelated edits, and report deeper issues separately instead of silently fixing them.
+2. **Anti-regression.** Previously passing tests must still pass, and new warnings count as failures.
+3. **Self-critique.** A short checklist runs before a task is reported complete: objective covered, evidence-backed, no regressions, scoped diff, edge cases considered.
+4. **Structured output.** Every state-changing turn ends with *what changed*, *what was verified*, and *what remains*.
+
+---
+
+## Benchmarks
+
+AlphaCode is written in Rust and designed to keep its runtime footprint small.
+
+> These are **historical snapshots** kept for reproducibility. They are not a guarantee of current performance on every machine, OS, workload or version, and not a universal ranking.
+
+**Memory, one active session**
+
+| Tool | RAM | vs. AlphaCode |
+| --- | ---: | ---: |
+| **AlphaCode** | **27.8 MB** | **1.0×** |
+| Codex CLI | 140.0 MB | 5.0× |
+| pi | 144.4 MB | 5.2× |
+| Cursor Agent | 214.9 MB | 7.7× |
+| Antigravity CLI | 243.7 MB | 8.8× |
+| GitHub Copilot CLI | 333.3 MB | 12.0× |
+| OpenCode | 371.5 MB | 13.4× |
+| Claude Code | 386.6 MB | 13.9× |
+
+**Memory, ten concurrent sessions**
+
+| Tool | RAM | vs. AlphaCode |
+| --- | ---: | ---: |
+| **AlphaCode** | **117.0 MB** | **1.0×** |
+| Codex CLI | 334.8 MB | 2.9× |
+| pi | 833.0 MB | 7.1× |
+| Antigravity CLI | 1,021.2 MB | 8.7× |
+| Cursor Agent | 1,632.4 MB | 14.0× |
+| GitHub Copilot CLI | 1,756.5 MB | 15.0× |
+| Claude Code | 2,300.6 MB | 19.7× |
+| OpenCode | 3,237.2 MB | 27.7× |
+
+**Reproducing the results.** Record: AlphaCode version or commit, OS, CPU and RAM, build profile, enabled features, number of active sessions, measurement method, warm vs. cold state, and the exact workload.
+
+---
+
+## Installation
 
 ### Windows
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex
 ```
+
+The installer detects your CPU architecture, downloads the latest release, verifies SHA-256 checksums, installs `alphacode.exe` to `%LOCALAPPDATA%\Programs\alphacode\bin\`, and runs **without administrator privileges**.
+
+Options such as `-Version`, `-FromSource`, `-AddPath` and `-PathDryRun` are script parameters. A piped `iex` cannot accept them, so invoke the script as a script block:
+
+```powershell
+# Pin a version
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1))) -Version vX.Y.Z
+
+# Build from source
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1))) -FromSource
+
+# Add to your user PATH
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1))) -AddPath
+
+# Preview what -AddPath would change, without writing anything
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1))) -AddPath -PathDryRun
+```
+
+`-AddPath` is deliberately conservative: it writes only `HKCU\Environment\Path` (never the machine-wide PATH), appends rather than prepends, is a no-op on re-run, and broadcasts `WM_SETTINGCHANGE` so new terminals pick it up. It does not modify the PATH of the current shell, so open a new terminal afterwards. `%USERPROFILE%`-style entries keep working because the value is read and written unexpanded.
 
 ### macOS / Linux
 
@@ -417,664 +439,25 @@ iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/in
 curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh | bash
 ```
 
-Then:
+The script downloads the latest release, verifies its checksum, puts the `alphacode` binary in `~/.local/bin`, and prints PATH instructions if that directory isn't on your PATH yet.
 
 ```bash
-alphacode
+# Pin a release
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh | bash -s -- --version vX.Y.Z
+
+# Add to your shell profile (bash/zsh/fish/nushell/csh/ksh, idempotent)
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh | bash -s -- --add-path
 ```
 
-No API key is required to begin using the built-in free AI lane.
-
----
-
-# 🦊 2. Connect Firefox
-
-Install:
-
-**[AlphaCode Browser Agent for Firefox](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)**
-
-Then configure the AlphaCode browser integration:
+Verify the install:
 
 ```bash
-alphacode browser setup
-```
-
-Check the connection:
-
-```bash
-alphacode browser status
-```
-
-A healthy setup should report that the browser bridge is available and responding.
-
----
-
-# 🔐 Signing in with a provider
-
-Most providers work from an environment variable (`ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, and so on). Run `/login` inside AlphaCode for the
-interactive flows.
-
-**OpenAI (Codex OAuth)** is the exception: it needs a local callback listener, so
-AlphaCode serves the redirect on `http://localhost:1455/auth/callback` while you
-sign in. Make sure port `1455` on localhost is free, and that nothing else is
-listening on it, before you start. If login fails with a timeout, something is
-already bound to that port — stop it and run `/login` again.
-
-See [OAUTH.md](OAUTH.md) for the full set of provider flows and troubleshooting.
-
----
-
-# ⚡ 3. Give AlphaCode a task
-
-You don't need special syntax.
-
-Try:
-
-```text
-Explain this project and identify the main entry points.
-```
-
-Then:
-
-```text
-Find the biggest bugs and explain them.
-```
-
-Then:
-
-```text
-Fix the highest-impact bug and run the tests.
-```
-
-For browser workflows:
-
-```text
-Open the application in Firefox and inspect the login flow.
-```
-
-Or:
-
-```text
-Open the website, test the registration form,
-and report validation problems.
-```
-
----
-
-# 🧰 What AlphaCode Can Actually Do
-
-## 📁 Work with your code
-
-AlphaCode can:
-
-* Read files
-* Create files
-* Edit existing code
-* Apply patches
-* Search repositories
-* Trace code paths
-* Understand project structure
-* Run tests
-* Run build systems
-* Execute commands
-* Review diffs
-* Diagnose errors
-
----
-
-## 🌐 Work with the web
-
-AlphaCode can combine web tools with browser automation.
-
-It can:
-
-* Search the web
-* Fetch pages
-* Inspect web content
-* Navigate real browser sessions
-* Interact with web applications
-* Work with forms
-* Inspect DOM structures
-* Handle dynamic pages
-* Work with browser state
-* Capture screenshots
-* Assist with QA
-* Assist with security testing
-
----
-
-## 🖥 Control desktop applications
-
-AlphaCode also supports native desktop automation.
-
-It can discover applications, inspect accessibility trees, find controls, click elements, type text, press keys, scroll, focus applications, and capture screenshots.
-
-Supported accessibility backends include:
-
-| Platform | Technology        |
-| -------- | ----------------- |
-| Windows  | UI Automation     |
-| macOS    | Accessibility API |
-| Linux    | AT-SPI2           |
-
-This makes AlphaCode useful beyond websites.
-
-For example:
-
-```text
-Open Calculator.
-Calculate 123 × 456.
-Read the result.
-```
-
-The agent can use the desktop environment to complete the workflow.
-
----
-
-# 🐝 Swarm Mode
-
-Large tasks can be divided into smaller tasks and handled by multiple agents.
-
-```mermaid
-flowchart TD
-    G["Large Goal"] --> P["Planner"]
-
-    P --> A["Agent A<br/>Code Analysis"]
-    P --> B["Agent B<br/>Security Review"]
-    P --> C["Agent C<br/>Tests"]
-    P --> D["Agent D<br/>Documentation"]
-
-    A --> M["Coordinator"]
-    B --> M
-    C --> M
-    D --> M
-
-    M --> R["Review"]
-    R --> F["Final Result"]
-```
-
-Example:
-
-```text
-/swarm "Analyze this application from architecture,
-security, testing, and performance perspectives."
-```
-
-Swarm Mode is designed for tasks that can be meaningfully decomposed into independent or semi-independent work.
-
----
-
-# 🧠 Memory and Persistent Sessions
-
-Long-running work should not disappear because a terminal closed.
-
-AlphaCode supports persistent sessions so you can continue previous work.
-
-```bash
-alphacode sessions list
-```
-
-Resume:
-
-```bash
-alphacode --resume
-```
-
-Or resume a specific session:
-
-```bash
-alphacode --resume <id>
-```
-
-This is particularly useful for:
-
-* Large codebases
-* Security assessments
-* Long debugging sessions
-* Multi-stage development
-* Research
-* Browser workflows
-* Large refactors
-
----
-
-# 🔌 Bring Your Own AI
-
-AlphaCode is designed to be model-agnostic.
-
-You can start with the built-in free AI lane and later connect additional providers.
-
-Depending on the available integrations, AlphaCode supports providers and OpenAI-compatible services such as:
-
-* Anthropic / Claude
-* OpenAI / GPT
-* Google Gemini
-* GitHub Copilot
-* Cursor
-* OpenRouter
-* AWS Bedrock
-* Azure
-* OpenAI-compatible APIs
-* Self-hosted model endpoints
-
-List providers:
-
-```bash
-alphacode provider list
-```
-
-Show the current provider:
-
-```bash
-alphacode provider current
-```
-
-List models:
-
-```bash
-alphacode model list
-```
-
-Change models:
-
-```bash
-alphacode model use <model>
-```
-
-Inside the TUI:
-
-```text
-Ctrl+T
-```
-
-opens the model/provider selector.
-
----
-
-# 🛠 40+ Built-in Tools
-
-AlphaCode provides a broad toolset so the agent can move from reasoning to execution.
-
-### Files
-
-| Tool          | Purpose                 |
-| ------------- | ----------------------- |
-| `read`        | Read files              |
-| `write`       | Create or replace files |
-| `edit`        | Make targeted changes   |
-| `multiedit`   | Apply multiple edits    |
-| `patch`       | Apply patches           |
-| `apply_patch` | Apply unified diffs     |
-| `ls`          | Inspect directories     |
-
-### Search & Analysis
-
-| Tool                  | Purpose                     |
-| --------------------- | --------------------------- |
-| `agentgrep`           | Code-aware search           |
-| `session_search`      | Search previous sessions    |
-| `conversation_search` | Search conversation history |
-
-### Execution
-
-| Tool    | Purpose                |
-| ------- | ---------------------- |
-| `bash`  | Execute shell commands |
-| `batch` | Run multiple actions   |
-| `bg`    | Background execution   |
-
-### Web & Browser
-
-| Tool        | Purpose                 |
-| ----------- | ----------------------- |
-| `browser`   | Real browser automation |
-| `webfetch`  | Fetch web content       |
-| `websearch` | Search the web          |
-| `scrapling` | Advanced scraping       |
-| `httpflow`  | HTTP analysis           |
-| `open`      | Open files and URLs     |
-
-### Desktop
-
-| Tool                 | Purpose                           |
-| -------------------- | --------------------------------- |
-| `desktop`            | Cross-platform desktop automation |
-| `macos_computer_use` | macOS computer control            |
-
-### Agent Intelligence
-
-| Tool         | Purpose                    |
-| ------------ | -------------------------- |
-| `memory`     | Persistent project context |
-| `initiative` | Track larger objectives    |
-| `todo`       | Manage tasks               |
-| `plan`       | Plan complex work          |
-| `swarm`      | Coordinate multiple agents |
-
-### Utilities
-
-| Tool             | Purpose                        |
-| ---------------- | ------------------------------ |
-| `doctor`         | Diagnose installation problems |
-| `self_improve`   | Agent improvement workflows    |
-| `selfdev`        | Development workflows          |
-| `cron`           | Scheduled tasks                |
-| `schedule`       | Ambient scheduling             |
-| `jwt`            | JWT parsing                    |
-| `clipboard`      | Clipboard operations           |
-| `side_panel`     | Side-panel output              |
-| `discover_tools` | Discover integrations          |
-
----
-
-# 🎓 Skills
-
-AlphaCode can extend its behavior through reusable skills.
-
-Examples include:
-
-```text
-/bugbounty
-/meme-coin-audit
-/frontend-design
-```
-
-Browse available skills:
-
-```text
-/skills
-```
-
-This lets AlphaCode become specialized for different workflows without changing the core agent.
-
----
-
-# 📊 Benchmarks
-
-Performance matters when an agent is running continuously.
-
-AlphaCode is written in Rust and is designed to keep its runtime footprint relatively small.
-
-The following figures are **historical benchmark snapshots** retained for reproducibility. They are not a guarantee of current performance across every machine, operating system, workload, or software version.
-
-## Memory Usage — One Active Session
-
-| Tool               |         RAM | Relative to AlphaCode |
-| ------------------ | ----------: | --------------------: |
-| **AlphaCode**      | **27.8 MB** |              **1.0×** |
-| Codex CLI          |    140.0 MB |                  5.0× |
-| pi                 |    144.4 MB |                  5.2× |
-| Cursor Agent       |    214.9 MB |                  7.7× |
-| Antigravity CLI    |    243.7 MB |                  8.8× |
-| GitHub Copilot CLI |    333.3 MB |                 12.0× |
-| OpenCode           |    371.5 MB |                 13.4× |
-| Claude Code        |    386.6 MB |                 13.9× |
-
-## Memory Usage — Ten Concurrent Sessions
-
-| Tool               |          RAM | Relative to AlphaCode |
-| ------------------ | -----------: | --------------------: |
-| **AlphaCode**      | **117.0 MB** |              **1.0×** |
-| Codex CLI          |     334.8 MB |                  2.9× |
-| pi                 |     833.0 MB |                  7.1× |
-| Antigravity CLI    |   1,021.2 MB |                  8.7× |
-| Cursor Agent       |   1,632.4 MB |                 14.0× |
-| GitHub Copilot CLI |   1,756.5 MB |                 15.0× |
-| Claude Code        |   2,300.6 MB |                 19.7× |
-| OpenCode           |   3,237.2 MB |                 27.7× |
-
-### Reproducing the benchmarks
-
-For meaningful comparisons, record:
-
-1. AlphaCode version or commit
-2. Operating system
-3. CPU and RAM
-4. Build profile
-5. Enabled features
-6. Number of active sessions
-7. Measurement method
-8. Warm/cold state
-9. Exact workload
-
-Benchmarks can vary significantly with workloads and runtime conditions.
-
-**Do not treat these numbers as a universal performance ranking.**
-
----
-
-# 🛡 Safety by Design
-
-An agent that can execute actions needs safeguards.
-
-AlphaCode includes protections around potentially destructive operations.
-
-Safety mechanisms include:
-
-* Destructive filesystem/device targets can be blocked.
-* Risky actions can require explicit permission.
-* Shell execution passes through safety controls.
-* Network operations can apply SSRF and credential-leak heuristics.
-* Interrupted sessions are tracked rather than silently discarded.
-* Desktop automation has action timeouts.
-* Desktop operations include emergency-stop handling.
-* Input state is cleaned up when operations fail.
-* Browser and desktop data should be treated as potentially untrusted.
-
-**AI agents can make mistakes.**
-
-Always review important changes before deploying them to production systems.
-
-Review your changes with:
-
-```text
-/diff
-```
-
----
-
-# 🧪 Security Testing & Bug Bounty Workflows
-
-AlphaCode can also be useful for authorized security research.
-
-Its combination of:
-
-```text
-Code Analysis
-      +
-HTTP/Web Tools
-      +
-Browser Automation
-      +
-Terminal Execution
-      +
-Memory
-      +
-Multi-Agent Workflows
-```
-
-makes it possible to build repeatable security-testing workflows.
-
-Examples:
-
-```text
-Analyze this application for authentication weaknesses.
-```
-
-```text
-Review the API for insecure direct object references.
-```
-
-```text
-Trace this parameter through the application
-and determine whether it reaches a dangerous sink.
-```
-
-```text
-Open the authorized test environment in Firefox,
-test the input validation,
-and document reproducible findings.
-```
-
-Use AlphaCode only against systems and environments you are authorized to test.
-
----
-
-# 🖥 Desktop Control
-
-AlphaCode can interact with native applications using accessibility APIs rather than relying exclusively on screen coordinates.
-
-```mermaid
-flowchart TD
-    A["AI Agent"] --> B["Desktop Tool"]
-    B --> C["Accessibility Layer"]
-
-    C --> W["Windows UIA"]
-    C --> M["macOS AX"]
-    C --> L["Linux AT-SPI2"]
-```
-
-Typical actions include:
-
-```text
-list_windows
-snapshot
-find
-click
-type
-press
-scroll
-focus
-screenshot
-toggle
-expand
-collapse
-```
-
-Example:
-
-```text
-User:
-Open Calculator and calculate 123 * 456.
-
-AlphaCode:
-→ Find Calculator
-→ Inspect accessibility tree
-→ Locate calculator controls
-→ Enter expression
-→ Read result
-→ Report 56088
-```
-
----
-
-# 🧩 MCP Support
-
-AlphaCode supports the Model Context Protocol ecosystem, allowing additional tools and services to be connected to the agent.
-
-This makes the architecture extensible:
-
-```text
-AlphaCode
-   │
-   ├── Built-in Tools
-   ├── Browser
-   ├── Desktop
-   ├── Skills
-   ├── Swarm
-   └── MCP
-          │
-          ├── External Tools
-          ├── Services
-          └── Custom Integrations
-```
-
-The result is an agent that can grow beyond its built-in capabilities.
-
----
-
-# 🚀 Installation
-
-## Windows
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex
-```
-
-The installer can:
-
-* Detect the CPU architecture
-* Download the latest release
-* Verify SHA-256 checksums
-* Install `alphacode.exe`
-* Add AlphaCode to your user PATH (opt-in, see below)
-* Run without administrator privileges
-
-Pin a version:
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -Version vX.Y.Z
-```
-
-Build from source:
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -FromSource
-```
-
-Add to your user PATH:
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -AddPath
-```
-
-Preview what `-AddPath` would change, without writing anything:
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.ps1 | iex -AddPath -PathDryRun
-```
-
-`-AddPath` is conservative by design: it writes only `HKCU\Environment\Path`
-(never the machine-wide PATH), appends rather than prepends so no existing
-entry changes precedence, is a no-op on a re-run, and broadcasts
-`WM_SETTINGCHANGE` so new terminals pick it up. It deliberately does **not**
-rewrite the PATH of the shell you ran it from — open a new terminal instead.
-Entries using `%USERPROFILE%`-style references keep working, because the value
-is read and written unexpanded.
-
----
-
-## macOS / Linux
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh | bash
-```
-
-Pin a release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh \
-  | bash -s -- --version vX.Y.Z
-```
-
-Add to your shell profile (bash/zsh/fish/nushell/csh/ksh, idempotent):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/install.sh \
-  | bash -s -- --add-path
-```
-
-Verify:
-
-```bash
-which alphacode
+which alphacode        # Windows: Get-Command alphacode
 alphacode --version
+alphacode doctor
 ```
 
----
-
-# 🏗 Build From Source
+### Build from source
 
 ```bash
 git clone https://github.com/dragonked2/alphacode.git
@@ -1083,415 +466,370 @@ cargo build --release
 ./target/release/alphacode --version
 ```
 
-AlphaCode currently uses Rust 1.94.1 / edition 2024 as pinned by the repository toolchain configuration.
-
-Platform requirements vary by operating system.
-
----
-
-# ⚡ Essential Commands
+The Rust version (edition 2024) is pinned in [`rust-toolchain.toml`](rust-toolchain.toml), and you need a C toolchain for your platform. The default build skips heavy optional stacks (Bedrock, embeddings, PDF, Mermaid rendering) to keep cold builds fast. Opt in when you need them:
 
 ```bash
-alphacode
+cargo build --release --features bedrock,embeddings,pdf,renderer
 ```
 
-Start AlphaCode.
-
-```bash
-alphacode run "fix the failing test"
-```
-
-Run a task directly.
-
-```bash
-alphacode browser setup
-```
-
-Set up the browser bridge.
-
-```bash
-alphacode browser status
-```
-
-Check browser connectivity.
-
-```bash
-alphacode sessions list
-```
-
-List saved sessions.
-
-```bash
-alphacode --resume
-```
-
-Resume previous work.
-
-```bash
-alphacode provider list
-```
-
-List AI providers.
-
-```bash
-alphacode model list
-```
-
-List available models.
+### Update
 
 ```bash
 alphacode update
 ```
 
-Update AlphaCode.
+---
+
+## Uninstall
+
+Removing AlphaCode takes one command. Close any running AlphaCode sessions first (on Windows a running `alphacode.exe` can't be deleted).
+
+### Option 1: uninstall script (recommended)
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.ps1 | iex
+```
+
+By default this removes the installed binary and leaves your settings and saved sessions in place, so a later reinstall picks up where you left off.
+
+### Option 2: uninstall and delete all data (`--purge`)
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.sh | bash -s -- --purge
+
+# or, equivalently, with an environment variable
+curl -fsSL https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.sh | ALPHACODE_PURGE=1 bash
+```
+
+```powershell
+# Windows: -Purge is a script parameter, so invoke it as a script block
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/dragonked2/alphacode/main/scripts/uninstall.ps1))) -Purge
+```
+
+> **Purge is permanent.** It deletes your configuration, saved sessions and logs, which can include locally stored sign-in data. Back up anything you want to keep first, for example `cp -r ~/.config/alphacode ~/alphacode-backup`.
+
+Want to read the script before running it? Open [`uninstall.sh`](scripts/uninstall.sh) or [`uninstall.ps1`](scripts/uninstall.ps1) in the repo first, or download the file and run it locally.
+
+### Option 3: manual uninstall
+
+| What | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| Binary | `~/.local/bin/alphacode` | `~/.local/bin/alphacode` | `%LOCALAPPDATA%\Programs\alphacode\` |
+| Config | `~/.config/alphacode/` | `~/Library/Application Support/alphacode/` | `%APPDATA%\alphacode\` |
+| Sessions | `~/.local/share/alphacode/sessions/` | `~/Library/Application Support/alphacode/` | `%LOCALAPPDATA%\alphacode\sessions\` |
+| Logs | `~/.local/share/alphacode/logs/` | `~/Library/Application Support/alphacode/` | `%LOCALAPPDATA%\alphacode\logs\` |
+
+```bash
+# Linux
+rm -f ~/.local/bin/alphacode
+rm -rf ~/.config/alphacode ~/.local/share/alphacode      # data: skip this line to keep it
+
+# macOS
+rm -f ~/.local/bin/alphacode
+rm -rf ~/Library/Application\ Support/alphacode           # data: skip this line to keep it
+```
+
+```powershell
+# Windows
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\alphacode"
+Remove-Item -Recurse -Force "$env:APPDATA\alphacode", "$env:LOCALAPPDATA\alphacode"   # data: skip to keep it
+```
+
+Built from source? Delete the cloned repository. If you installed with `cargo install --path .`, run `cargo uninstall alphacode`.
+
+### Clean up what the uninstaller doesn't touch
+
+* **PATH entry.** macOS / Linux: delete the `export PATH=...` line that `--add-path` (or you) added to your shell profile (`~/.bashrc`, `~/.zshrc`, fish config, and so on). Windows: open *Settings → System → About → Advanced system settings → Environment Variables*, edit your **user** `Path`, and remove the AlphaCode entry. Use the GUI rather than a script, because scripts can expand `%USERPROFILE%`-style entries into hard-coded paths.
+* **Firefox Browser Agent.** In Firefox, open `about:addons`, find *AlphaCode Browser Agent*, and choose **Remove**.
+* **Native messaging registration.** If you ran `alphacode browser setup`, delete the AlphaCode entry from Firefox's native messaging locations (check the exact name): Linux `~/.mozilla/native-messaging-hosts/`, macOS `~/Library/Application Support/Mozilla/NativeMessagingHosts/`, Windows registry `HKCU\Software\Mozilla\NativeMessagingHosts`.
+* **Credentials.** Remove any `*_API_KEY` variables you exported for AlphaCode, and revoke API keys or OAuth grants in your provider accounts (Anthropic, OpenAI, Google, GitHub) if you no longer want AlphaCode to have access.
+* **Scheduled tasks.** If you created recurring jobs with the `cron` or `schedule` tools, remove them before uninstalling (`crontab -l` on macOS / Linux, Task Scheduler on Windows).
+
+### Verify it's gone
+
+```bash
+which alphacode                                    # should print nothing
+```
+
+```powershell
+Get-Command alphacode -ErrorAction SilentlyContinue   # should print nothing
+```
+
+If your shell still finds it, open a new terminal or run `hash -r` (bash/zsh).
+
+### Uninstall troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `Access denied` or "file in use" on Windows | Close AlphaCode and its terminals, then `Stop-Process -Name alphacode -Force` and retry |
+| `alphacode: command not found` after uninstall | That's expected. Open a new terminal to refresh the command cache |
+| Config folders still exist | Normal without `--purge`. Delete them manually (table above) or re-run with `--purge` |
+| Script can't be downloaded | Check your network or proxy, or use the manual steps above |
+
+### Reinstall or change versions
+
+Re-run the [installer](#installation). To keep your settings and sessions, don't use `--purge` when removing. To move to a specific release, use the pinned-version commands in [Installation](#installation). To stay current, run `alphacode update`.
 
 ---
 
-# ⌨️ Keyboard Shortcuts
+## Commands and Shortcuts
 
-| Shortcut | Action                      |
-| -------- | --------------------------- |
-| `F1`     | Keyboard shortcut reference |
-| `Ctrl+T` | Model/provider selector     |
-| `Ctrl+Y` | Agent activity              |
-| `Ctrl+C` | Pause active response       |
-| `Esc`    | Close dialog / go back      |
+**Essential commands**
 
----
+| Command | Purpose |
+| --- | --- |
+| `alphacode` | Start AlphaCode |
+| `alphacode doctor` | Check providers, terminal and paths |
+| `alphacode login` | Authenticate a provider |
+| `alphacode run "<task>"` | Run a task directly (non-interactive) |
+| `alphacode repl` | Simple REPL, no TUI |
+| `alphacode provider add <name>` | Add a custom OpenAI-compatible endpoint |
+| `alphacode browser setup` | Set up the browser bridge |
+| `alphacode browser status` | Check browser connectivity |
+| `alphacode sessions list` | List saved sessions |
+| `alphacode --resume` | Resume previous work |
+| `alphacode provider list` | List AI providers |
+| `alphacode model list` | List available models |
+| `alphacode update` | Update AlphaCode |
 
-# 💬 Slash Commands
+**Slash commands**
 
-| Command            | Purpose                   |
-| ------------------ | ------------------------- |
-| `/help`            | Help                      |
-| `/agents`          | Agent management          |
-| `/compact`         | Compact context           |
-| `/memory`          | Project memory            |
-| `/skills`          | Skills                    |
-| `/diff`            | Review changes            |
-| `/poke`            | Auto-follow-up            |
-| `/screenshot-mode` | Screenshot capture        |
-| `/exit`            | Exit and preserve session |
+| Command | Purpose |
+| --- | --- |
+| `/help` | Help |
+| `/agents` | Agent management |
+| `/compact` | Compact context |
+| `/memory` | Project memory |
+| `/skills` | Skills |
+| `/diff` | Review changes |
+| `/poke` | Auto-follow-up |
+| `/screenshot-mode` | Screenshot capture |
+| `/exit` | Exit and preserve the session |
 
----
+**Keyboard shortcuts**
 
-# ⚙️ Configuration
-
-AlphaCode stores configuration and session information outside your project.
-
-| Platform | Configuration                              |
-| -------- | ------------------------------------------ |
-| Linux    | `~/.config/alphacode/`                     |
-| macOS    | `~/Library/Application Support/alphacode/` |
-| Windows  | `%APPDATA%\alphacode\`                     |
-
-Important configuration areas include:
-
-| Section        | Purpose                      |
-| -------------- | ---------------------------- |
-| `[provider]`   | Provider/model configuration |
-| `[features]`   | Feature flags                |
-| `[display]`    | UI preferences               |
-| `[websearch]`  | Search configuration         |
-| `[agents]`     | Agent/swarm configuration    |
-| `[hooks]`      | Lifecycle hooks              |
-| `[safety]`     | Notifications and safety     |
-| `[compaction]` | Context management           |
-| `[power]`      | Power-management behavior    |
-| `[gateway]`    | Remote gateway               |
-
-See:
-
-[`docs/configuration.md`](./docs/configuration.md)
+| Shortcut | Action |
+| --- | --- |
+| `F1` | Shortcut reference |
+| `Ctrl+T` | Model/provider selector |
+| `Ctrl+Y` | Agent activity |
+| `Ctrl+C` | Pause active response |
+| `Esc` | Close dialog / go back |
 
 ---
 
-# 🩺 Troubleshooting
+## Configuration
 
-## AlphaCode command not found
+Configuration and sessions are stored outside your project:
 
-### macOS / Linux
+| OS | Config | Sessions | Logs |
+| --- | --- | --- | --- |
+| Linux | `~/.config/alphacode/` | `~/.local/share/alphacode/sessions/` | `~/.local/share/alphacode/logs/` |
+| macOS | `~/Library/Application Support/alphacode/` | same folder | same folder |
+| Windows | `%APPDATA%\alphacode\` | `%LOCALAPPDATA%\alphacode\sessions\` | `%LOCALAPPDATA%\alphacode\logs\` |
+
+A health monitor also records memory use, slow operations, error rates and per-subsystem liveness in `health.json`.
+
+| Section | Purpose |
+| --- | --- |
+| `[provider]` | Provider and model |
+| `[features]` | Feature flags |
+| `[display]` | UI preferences |
+| `[websearch]` | Search configuration |
+| `[agents]` | Agent and swarm configuration |
+| `[hooks]` | Lifecycle hooks |
+| `[safety]` | Notifications and safety |
+| `[compaction]` | Context management |
+| `[power]` | Power-management behavior |
+| `[gateway]` | Remote gateway |
+
+Full reference: [docs/configuration.md](docs/configuration.md).
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><strong><code>alphacode</code>: command not found</strong></summary>
+
+**macOS / Linux (bash):**
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-For zsh:
+**zsh:**
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### Windows
+**Windows:** re-run the installer with `-AddPath` (see [Installation](#installation)), or add the install directory to your user PATH, then open a new PowerShell window.
 
-Add the AlphaCode installation directory to your user PATH and restart PowerShell.
+</details>
 
----
-
-## Browser Agent is not responding
-
-Run:
+<details>
+<summary><strong>Browser Agent is not responding</strong></summary>
 
 ```bash
 alphacode browser status
-```
-
-Then:
-
-```bash
 alphacode browser setup
 ```
 
-Confirm that the Firefox extension is installed and enabled:
+Then confirm the [AlphaCode Browser Agent](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/) is installed and enabled in Firefox.
 
-**[AlphaCode Browser Agent — Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)**
+</details>
 
----
+<details>
+<summary><strong>Desktop automation is unavailable</strong></summary>
 
-## Desktop automation is unavailable
+* **macOS:** grant Accessibility and Screen Recording permission under *System Settings → Privacy & Security*.
+* **Linux:** make sure AT-SPI2 is available.
+* **Windows:** most apps work without extra permissions; elevated apps may require running AlphaCode elevated.
 
-### macOS
+</details>
 
-Grant Accessibility and Screen Recording permissions under:
+<details>
+<summary><strong>OpenAI login times out</strong></summary>
 
-```text
-System Settings
-→ Privacy & Security
-```
+Port `1455` on localhost is probably in use. Stop whatever is listening on it and run `/login` again. See the [docs](docs/) for more.
 
-### Linux
+</details>
 
-Ensure AT-SPI2 is available.
-
-### Windows
-
-Most applications work without additional permissions, although elevated applications may require elevated execution.
+Still stuck? Run `alphacode doctor` or [open an issue](https://github.com/dragonked2/alphacode/issues).
 
 ---
 
-# ❓ Frequently Asked Questions
+## FAQ
 
 <details>
 <summary><strong>What is AlphaCode?</strong></summary>
-<br>
 
-AlphaCode is an open-source AI coding agent that can work with code, terminals, websites, browsers, desktop applications, tools, and external AI providers.
+AlphaCode is an open-source AI coding agent that works with code, terminals, websites, real browsers, desktop applications, tools and multiple AI providers.
 
 </details>
 
 <details>
 <summary><strong>Is AlphaCode free?</strong></summary>
-<br>
 
-AlphaCode is open source under the MIT License and includes a built-in free AI lane designed to let users get started without configuring an API key.
+Yes. It is open source under the MIT License and includes a built-in free AI lane so you can start without configuring an API key. Third-party providers you connect may have their own costs.
 
 </details>
 
 <details>
 <summary><strong>Do I need an API key?</strong></summary>
-<br>
 
-Not to get started with the built-in free AI lane. Additional providers may require their own authentication or API credentials.
+Not to get started. Additional providers may require their own authentication or credentials.
 
 </details>
 
 <details>
 <summary><strong>What is the AlphaCode Browser Agent?</strong></summary>
-<br>
 
-It is the Firefox extension that connects AlphaCode with a real Firefox browser session, enabling browser-oriented agent workflows.
-
-</details>
-
-<details>
-<summary><strong>What can the browser agent do?</strong></summary>
-<br>
-
-It is designed to support browser interaction including navigation, page/DOM interaction, forms, dynamic web applications, tabs, frames, screenshots, downloads, and other browser workflows exposed by the AlphaCode browser integration.
+It is the Firefox extension that connects AlphaCode to a real Firefox session for navigation, DOM and form interaction, tabs, frames, screenshots, downloads and other browser workflows.
 
 </details>
 
 <details>
 <summary><strong>Can AlphaCode automate websites?</strong></summary>
-<br>
 
-Yes. AlphaCode's browser integration is designed for real browser automation through Firefox.
+Yes. Its browser integration performs real browser automation through Firefox, including JavaScript-heavy sites and existing logged-in sessions.
 
 </details>
 
 <details>
 <summary><strong>Can AlphaCode control desktop applications?</strong></summary>
-<br>
 
-Yes. AlphaCode includes cross-platform desktop automation through accessibility APIs.
-
-</details>
-
-<details>
-<summary><strong>Can I use Claude, GPT, Gemini, or other models?</strong></summary>
-<br>
-
-AlphaCode is designed to be model-agnostic and supports multiple provider integrations. You can switch providers and models without changing your project workflow.
+Yes, on Windows, macOS and Linux, using native accessibility APIs.
 
 </details>
 
 <details>
-<summary><strong>Is AlphaCode only for experienced developers?</strong></summary>
-<br>
+<summary><strong>Can I use Claude, GPT, Gemini or other models?</strong></summary>
 
-No. AlphaCode accepts natural-language instructions, so beginners can start with simple requests. However, users should review important code and actions before deploying them.
-
-</details>
-
-<details>
-<summary><strong>Can AlphaCode work on security testing?</strong></summary>
-<br>
-
-Yes. Its code analysis, HTTP, web, browser, terminal, and automation capabilities can support authorized security research and testing.
+Yes. AlphaCode is model-agnostic. Switch providers and models without changing your workflow. See [Bring your own model](#bring-your-own-model).
 
 </details>
 
 <details>
-<summary><strong>Does AlphaCode work on Windows?</strong></summary>
-<br>
+<summary><strong>Is it only for experienced developers?</strong></summary>
 
-Yes. AlphaCode supports Windows, macOS, and Linux.
-
-</details>
-
-<details>
-<summary><strong>Does AlphaCode remember previous work?</strong></summary>
-<br>
-
-AlphaCode supports persistent sessions and project memory features that allow longer workflows to continue across sessions.
+No. Plain-English requests work fine. Always review important code and actions before deploying.
 
 </details>
 
 <details>
-<summary><strong>How do I update AlphaCode?</strong></summary>
-<br>
+<summary><strong>Can it be used for security testing?</strong></summary>
 
-```bash
-alphacode update
-```
+Yes, for authorized research and testing only. See [Security Testing](#security-testing-and-bug-bounty-workflows).
+
+</details>
+
+<details>
+<summary><strong>Does it remember previous work?</strong></summary>
+
+Yes. Persistent sessions and project memory let longer workflows continue across sessions.
+
+</details>
+
+<details>
+<summary><strong>How do I update it?</strong></summary>
+
+Run `alphacode update`.
 
 </details>
 
 ---
 
-# 🔐 Security
+## Use Cases
 
-Security issues should be reported privately according to the project's security policy.
-
-See:
-
-[`SECURITY.md`](./SECURITY.md)
-
-For the Firefox extension, please also use the appropriate Mozilla Add-ons reporting mechanisms where applicable.
-
----
-
-# 📚 Documentation
-
-* [`docs/`](./docs/) — Documentation
-* [`docs/configuration.md`](./docs/configuration.md) — Configuration
-* [`docs/architecture.md`](./docs/architecture.md) — Architecture
-* [`CHANGELOG.md`](./CHANGELOG.md) — Release history
-* [`CONTRIBUTING.md`](./CONTRIBUTING.md) — Contribution guide
-* [`SECURITY.md`](./SECURITY.md) — Security policy
+| Area | Examples |
+| --- | --- |
+| **Software development** | Debugging, refactoring, features, test generation, code review, repo exploration, docs, build troubleshooting |
+| **Web development** | Frontend and backend work, API testing, browser testing, UI validation |
+| **Security research** | Authorized pentesting, bug bounty, application security review, code auditing, HTTP analysis |
+| **QA and testing** | Regression and form testing, UI verification, reproducibility checks |
+| **Automation** | Desktop apps, browser workflows, repetitive tasks, data collection |
 
 ---
 
-# 🌍 Use Cases
+## Vision
 
-AlphaCode is designed to support a wide range of workflows.
+> **AI should not stop at generating instructions. It should understand the environment, use the right tools, do the work, observe the result, and verify what happened.**
 
-### 👨‍💻 Software Development
-
-* Debugging
-* Refactoring
-* Feature development
-* Test generation
-* Code review
-* Repository exploration
-* Documentation
-* Build troubleshooting
-
-### 🌐 Web Development
-
-* Frontend development
-* Backend development
-* API testing
-* Browser testing
-* UI validation
-* Dynamic web application workflows
-
-### 🔐 Security Research
-
-* Authorized penetration testing
-* Bug bounty workflows
-* Application security review
-* Code auditing
-* HTTP analysis
-* Vulnerability investigation
-* Security automation
-
-### 🧪 QA & Testing
-
-* Regression testing
-* Browser testing
-* Form testing
-* UI verification
-* Automated workflows
-* Reproducibility checks
-
-### 🖥 Automation
-
-* Desktop applications
-* Browser workflows
-* Repetitive tasks
-* Data collection
-* Environment inspection
+AlphaCode brings code, terminal, web, Firefox, desktop, memory, skills, MCP, multiple models and multiple agents into one cohesive agent.
 
 ---
 
-# 🗺️ The AlphaCode Vision
+## Documentation
 
-The goal is simple:
+* [Docs index](docs/)
+* [Configuration](docs/configuration.md)
+* [Changelog](CHANGELOG.md)
+* [Contributing](CONTRIBUTING.md)
+* [Code of conduct](CODE_OF_CONDUCT.md)
+* [Security policy](SECURITY.md)
 
-> **AI should not stop at generating instructions. It should be able to understand the environment, use the right tools, perform the work, observe the result, and verify what happened.**
+## Security
 
-That means bringing together:
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). For issues with the Firefox extension, you can also use Mozilla's add-on reporting tools.
 
-```text
-AI
-│
-├── Code
-├── Terminal
-├── Web
-├── Firefox
-├── Desktop
-├── Memory
-├── Skills
-├── MCP
-├── Multiple Models
-└── Multiple Agents
-```
-
-into one cohesive agent.
-
-AlphaCode is built around that idea.
-
----
-
-# 🤝 Contributing
+## Contributing
 
 ```bash
 git clone https://github.com/dragonked2/alphacode.git
 cd alphacode
-
 cargo build --release
 cargo test --lib
 cargo clippy --lib -- -D warnings
@@ -1499,76 +837,28 @@ cargo clippy --lib -- -D warnings
 
 Before opening a pull request:
 
-* [ ] Release build passes
-* [ ] Relevant tests pass
-* [ ] New behavior has appropriate tests
-* [ ] Clippy is clean
-* [ ] Public APIs are documented
-* [ ] Dependencies are justified
-* [ ] User-visible changes are documented
+- [ ] Release build passes
+- [ ] Relevant tests pass
+- [ ] New behavior has tests
+- [ ] Clippy is clean
+- [ ] Public APIs are documented
+- [ ] New dependencies are justified
+- [ ] User-visible changes are documented
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
----
+## Support AlphaCode
 
-# ⭐ Support AlphaCode
-
-If AlphaCode is useful to you, there are several ways to help:
-
-**⭐ Star the repository**
-
-**🐛 Report reproducible bugs**
-
-**💡 Suggest improvements**
-
-**📝 Improve documentation**
-
-**💻 Contribute code**
-
-**🧪 Test new releases**
-
-**📣 Share AlphaCode with other developers**
-
-<br>
+Star the repo, report reproducible bugs, suggest improvements, improve the docs, contribute code, test new releases, and tell other developers.
 
 <div align="center">
 
-<a href="https://github.com/dragonked2/alphacode">
-  <img src="https://img.shields.io/badge/⭐%20STAR%20ALPHACODE-FFD34D?style=for-the-badge&labelColor=1a1a2e&logo=github&logoColor=white" alt="Star AlphaCode">
-</a>
+[![Star AlphaCode](https://img.shields.io/badge/Star%20AlphaCode%20on%20GitHub-FFD34D?style=for-the-badge&labelColor=1a1a2e&logo=github&logoColor=black)](https://github.com/dragonked2/alphacode)
+&nbsp;
+[![Get the Firefox Browser Agent](https://img.shields.io/badge/Get%20the%20Firefox%20Browser%20Agent-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/)
+&nbsp;
+[![Buy me a potato](https://img.shields.io/badge/Buy%20me%20a%20potato-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/dragonked2)
 
-<br><br>
-
-<a href="https://addons.mozilla.org/en-US/firefox/addon/alphacode-browser-agent/">
-  <img src="https://img.shields.io/badge/🦊%20GET%20THE%20FIREFOX%20BROWSER%20AGENT-FF7139?style=for-the-badge" alt="Get AlphaCode Browser Agent">
-</a>
-
-<br><br>
-
-<a href="https://www.buymeacoffee.com/dragonked2">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20Potato&emoji=🥔&slug=dragonked2&button_colour=5F7FFF&font_colour=ffffff&font_family=Arial&outline_colour=000000&coffee_colour=FFDD00" alt="Buy me a Potato">
-</a>
-
-<br><br>
-
-<sub>
-Built with 🦀 Rust by
-<a href="https://github.com/dragonked2">Ali Essam</a>
-· MIT Licensed
-· Open Source
-· AI Coding Agent
-· Browser Agent
-· Desktop Automation
-</sub>
+<sub>Built with Rust by <a href="https://github.com/dragonked2">Ali Essam</a> · MIT Licensed · Open Source</sub>
 
 </div>
-
----
-
-# 🔎 Discover AlphaCode
-
-**AI coding agent · open source AI coding assistant · autonomous coding agent · terminal AI agent · AI developer tool · coding assistant · AI software engineer · AI programming assistant · browser automation · browser agent · Firefox automation · Firefox AI agent · AI browser agent · web automation · browser testing · DOM automation · desktop automation · computer use · AI code review · AI debugging · AI security testing · bug bounty automation · penetration testing assistant · developer automation · Rust AI agent · MCP AI agent · multi-agent coding · AI swarm · local developer tools · free AI coding assistant · open-source coding assistant**
-
-If you are looking for an AI coding agent that can go beyond chat and actually interact with your development environment, AlphaCode is built for that.
-
-**Describe the goal. Give the agent the tools. Let it work. Verify the result.**

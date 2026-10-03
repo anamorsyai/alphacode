@@ -6,6 +6,10 @@
 # Installs to /root/.local/bin/alphacode with a symlink in /usr/local/bin
 # (both typically on PATH). Idempotent: re-running updates in place.
 #
+# Release assets on a public repo, so no GitHub token is needed or used —
+# past attempts to inline `alpctl github token` into --header broke the
+# pipe-install path (token quoting + no alpctl under `curl | sh`).
+#
 # Usage: curl -fsSL https://raw.githubusercontent.com/anamorsyai/alphacode/main/scripts/install-musl.sh | sh
 # Env override: ALPHACODE_RELEASE=v1.0.71 (default: latest release)
 
@@ -25,26 +29,20 @@ case "$ARCH" in
   *) say "ERROR: no musl build for $ARCH (only aarch64 is produced by build-alpine.yml)"; exit 1 ;;
 esac
 
-AUTHARGS=""
-if command -v alpctl >/dev/null 2>&1; then
-  T=$(alpctl github token 2>/dev/null || true)
-  [ -n "$T" ] && AUTHARGS="--header=Authorization: token $T"
-fi
-
 TAG="${ALPHACODE_RELEASE:-latest}"
 if [ "$TAG" = "latest" ]; then
   say "Resolving latest release ..."
-  TAG=$(wget -qO- $AUTHARGS "https://api.github.com/repos/$REPO/releases/latest" |
+  TAG=$(wget -qO- "https://api.github.com/repos/$REPO/releases/latest" |
     sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "$TAG" ] || { say "ERROR: could not resolve latest release"; exit 1; }
+  [ -n "$TAG" ] || { say "ERROR: could not resolve latest release (network or rate limit)"; exit 1; }
 fi
 say "Installing alphacode $TAG (musl static, $ARCH)"
 
 BASE="https://github.com/$REPO/releases/download/$TAG"
 say "Downloading ..."
-wget -qO "$TMP/archive.tar.gz" $AUTHARGS "$BASE/$ART.tar.gz" ||
+wget -qO "$TMP/archive.tar.gz" "$BASE/$ART.tar.gz" ||
   { say "ERROR: download failed ($BASE/$ART.tar.gz)"; exit 1; }
-if wget -qO "$TMP/checksums" $AUTHARGS "$BASE/$ART.sha256" 2>/dev/null && [ -s "$TMP/checksums" ]; then
+if wget -qO "$TMP/checksums" "$BASE/$ART.sha256" 2>/dev/null && [ -s "$TMP/checksums" ]; then
   (cd "$TMP" && sha256sum -c checksums >/dev/null 2>&1) ||
     { say "ERROR: checksum mismatch — aborting"; exit 1; }
   say "Checksum OK"

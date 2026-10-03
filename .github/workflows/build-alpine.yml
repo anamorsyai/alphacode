@@ -1,0 +1,107 @@
+name: build-alpine
+
+# Alpine (musl) aarch64 build — runs the agent on AlpineTerm / postmarketOS /
+# any musl-based Linux where the glibc release artifacts refuse to start.
+#
+# Why docker run instead of `container:`: GitHub only supports JavaScript
+# actions inside Alpine containers on x64 runners ("JavaScript Actions in
+# Alpine containers are only supported on x64 Linux runners"), so on the arm
+# runner the container job dies at "Set up job". Instead the JS actions run
+# on the ubuntu-22.04-arm host and only the build itself runs inside an
+# alpine:3.22 docker container.
+#
+# Native-only link deps on Linux (verified against Cargo.lock): libxkbcommon
+# (via xa11y-linux -> xkbcommon FFI). Everything else — ring, zbus, x11rb,
+# evdev, wl-clipboard-rs, resvg, image — is pure Rust, so no cmake/go/perl
+# toolchain is needed here.
+#
+# Artifacts: alphacode-linux-musl-aarch64.tar.gz (+ .sha256). Tag pushes also
+# attach the files to the release next to the glibc ones; the names never
+# collide with release.yml's alphacode-linux-arm64.tar.gz.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-alpine:
+    name: musl aarch64 (alpine 3.22)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The build runs inside an alpine:3.22 container (see
+      # scripts/build-alpine.sh): musl libc + libxkbcommon from Alpine 3.22 —
+      # the exact combination an AlpineTerm host has, so the produced binary
+      # links and runs there. Only the toolchain the release.yml build needs
+      # on top: build-base, pkgconf, libxkbcommon-dev.
+      - name: Build in Alpine 3.22 container
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/src \
+            -w /src \
+            alpine:3.22 \
+            sh scripts/build-alpine.sh
+
+      # Hard gate: run the musl binary natively on the arm64 host. It links
+      # musl libc, which is not present on ubuntu-22.04-arm, so run it inside
+      # the same alpine image its runtime deps come from.
+      - name: Smoke test binary
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE":/src \
+            -w /src \
+            alpine:3.22 \
+            sh -c "apk add --no-cache libxkbcommon >/dev/null && ./target/release/alphacode --version"
+
+      # Informational: the NEEDED entries should only ever be libxkbcommon
+      # plus libc.musl-aarch64 — a glibc library showing up here means the
+      # musl build silently broke.
+      - name: Show dynamic dependencies
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/src alpine:3.22 \
+            readelf -d /src/target/release/alphacode | grep NEEDED || true
+
+      # Tag builds embed the tag version; dispatch builds fall back to the
+      # package version in Cargo.toml (matches release.yml behavior).
+      - name: Set build version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Building alphacode v$VERSION for aarch64-unknown-linux-musl"
+
+      - name: Archive + checksum
+        shell: bash
+        run: |
+          tar -czf alphacode-linux-musl-aarch64.tar.gz -C target/release alphacode
+          sha256sum alphacode-linux-musl-aarch64.tar.gz > alphacode-linux-musl-aarch64.sha256
+          ls -la alphacode-linux-musl-aarch64.*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alphacode-linux-musl-aarch64
+          path: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          if-no-files-found: error
+
+      - name: Attach to release (tag builds only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          fail_on_unmatched_files: false

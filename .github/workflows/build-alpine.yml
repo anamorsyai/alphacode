@@ -15,9 +15,9 @@ name: build-alpine
 # evdev, wl-clipboard-rs, resvg, image — is pure Rust, so no cmake/go/perl
 # toolchain is needed here.
 #
-# Artifacts: alphacode-linux-musl-aarch64.tar.gz (+ .sha256). Tag pushes also
+# Artifacts: alphacode-linux-musl-{aarch64,x86_64}.tar.gz (+ .sha256). Tag pushes also
 # attach the files to the release next to the glibc ones; the names never
-# collide with release.yml's alphacode-linux-arm64.tar.gz.
+# collide with release.yml's alphacode-linux-{arm64,x86_64}.tar.gz.
 
 on:
   push:
@@ -29,8 +29,26 @@ permissions:
 
 jobs:
   build-alpine:
-    name: musl aarch64 (alpine 3.22)
-    runs-on: ubuntu-22.04-arm
+    name: musl ${{ matrix.triple }}
+    # Both targets build natively inside an alpine container on the runner whose
+    # arch matches the target, so cargo never cross-compiles and the musl linker
+    # plus libxkbcommon.a come from the same image the runtime deps do.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The musl asset name must match the Rust target triple, which is also
+          # what scripts/install.sh derives from $ARCH — keep the two in step.
+          - triple: aarch64-unknown-linux-musl
+            archive: alphacode-linux-musl-aarch64
+            os: ubuntu-22.04-arm
+          # Alpine/postmarketOS x86_64 hosts hit the same "ld-linux-x86-64.so.2:
+            # No such file or directory" failure; without this target the
+            # installer's musl branch has nothing to fall back to on x86_64.
+          - triple: x86_64-unknown-linux-musl
+            archive: alphacode-linux-musl-x86_64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,17 +149,19 @@ jobs:
       - name: Archive + checksum
         shell: bash
         run: |
-          tar -czf alphacode-linux-musl-aarch64.tar.gz -C target/release alphacode
-          sha256sum alphacode-linux-musl-aarch64.tar.gz > alphacode-linux-musl-aarch64.sha256
-          ls -la alphacode-linux-musl-aarch64.*
+          tar -czf "$ARCHIVE.tar.gz" -C target/release alphacode
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.sha256"
+          ls -la "$ARCHIVE".*
+        env:
+          ARCHIVE: ${{ matrix.archive }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: alphacode-linux-musl-aarch64
+          name: ${{ matrix.archive }}
           path: |
-            alphacode-linux-musl-aarch64.tar.gz
-            alphacode-linux-musl-aarch64.sha256
+            ${{ matrix.archive }}.tar.gz
+            ${{ matrix.archive }}.sha256
           if-no-files-found: error
 
       - name: Attach to release (tag builds only)
@@ -149,6 +169,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            alphacode-linux-musl-aarch64.tar.gz
-            alphacode-linux-musl-aarch64.sha256
+            ${{ matrix.archive }}.tar.gz
+            ${{ matrix.archive }}.sha256
           fail_on_unmatched_files: false

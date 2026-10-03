@@ -223,12 +223,22 @@ if [ "$PLATFORM" = "linux" ] && command -v ldd >/dev/null 2>&1; then
   fi
 fi
 
+# The musl artifact is named for the Rust target triple, which does not match
+# the $ARCH names the glibc archives use (aarch64 vs arm64). Map the two, so
+# adding a target to build-alpine.yml is all it takes for the installer to
+# find it — no second list to keep in sync here.
+case "$ARCH" in
+  arm64)  MUSL_ARCH=aarch64 ;;
+  x86_64) MUSL_ARCH=x86_64 ;;
+  *)      MUSL_ARCH="" ;;
+esac
+
 # Candidate assets in preference order. On musl the musl build is tried first,
 # then the glibc one, so releases published before this workflow existed (no musl
 # artifact) still install instead of forcing a long source build.
-if [ "$IS_MUSL" = "1" ] && [ "$ARCH" = "arm64" ]; then
-  CANDIDATES="alphacode-linux-musl-aarch64.tar.gz
-alphacode-linux-arm64.tar.gz"
+if [ "$IS_MUSL" = "1" ] && [ -n "$MUSL_ARCH" ]; then
+  CANDIDATES="alphacode-linux-musl-${MUSL_ARCH}.tar.gz
+alphacode-linux-${ARCH}.tar.gz"
   print "musl libc detected — preferring the static musl build."
 else
   CANDIDATES="alphacode-${PLATFORM}-${ARCH}.tar.gz"
@@ -261,15 +271,42 @@ fi
 URL="https://github.com/$REPO/releases/download/${VERSION}/$ASSET"
 print "Downloaded $ASSET"
 
-# Optional checksum verification.
-if curl -fsSL -o "$TMP/SHA256SUMS" \
-     "https://github.com/$REPO/releases/download/${VERSION}/SHA256SUMS" 2>/dev/null; then
-  print "Verifying checksum …"
-  if command -v sha256sum >/dev/null 2>&1; then
-    ( cd "$TMP" && sha256sum -c --ignore-missing < SHA256SUMS ) \
-      || fail "checksum verification failed"
+# --- Verify the download -----------------------------------------------------
+#
+# SHA256SUMS is merged from the release workflow's own build matrix. The musl
+# archives are attached by the separate build-alpine workflow and are NOT in
+# that file, so the previous `sha256sum -c --ignore-missing` reported success
+# while silently skipping the one file we had actually downloaded — a false
+# pass on exactly the newest, least-exercised artifact.
+#
+# So: locate the expected digest for THIS asset, and only then compare it.
+# Missing digest and wrong digest are deliberately different outcomes — the
+# first warns, the second fails. Collapsing them would let a corrupted or
+# tampered download pass as "no checksum published".
+print "Verifying checksum …"
+if ! command -v sha256sum >/dev/null 2>&1; then
+  warn "sha256sum not available — skipping checksum verification"
+else
+  EXPECTED=""
+  if curl -fsSL -o "$TMP/SHA256SUMS" \
+       "https://github.com/$REPO/releases/download/${VERSION}/SHA256SUMS" 2>/dev/null; then
+    # Exact filename match on the sha256sum field (col 2), tolerating the
+    # binary-mode "*" prefix sha256sum adds for binary targets.
+    EXPECTED="$(awk -v want="$ASSET" '{ n = $2; sub(/^\*/, "", n); if (n == want) print $1 }' \
+               "$TMP/SHA256SUMS" | head -1)"
+  fi
+  if [ -z "$EXPECTED" ] && curl -fsSL -o "$TMP/$ASSET.sha256" \
+       "https://github.com/$REPO/releases/download/${VERSION}/$ASSET.sha256" 2>/dev/null; then
+    EXPECTED="$(awk '{ print $1 }' "$TMP/$ASSET.sha256" | head -1)"
+  fi
+  if [ -z "$EXPECTED" ]; then
+    warn "no published checksum for $ASSET — skipping verification"
   else
-    warn "sha256sum not available — skipping checksum verification"
+    ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{ print $1 }')"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      fail "checksum verification failed for $ASSET (expected $EXPECTED, got $ACTUAL)"
+    fi
+    print "Checksum OK."
   fi
 fi
 

@@ -1,0 +1,154 @@
+name: build-alpine
+
+# Alpine (musl) aarch64 build — runs the agent on AlpineTerm / postmarketOS /
+# any musl-based Linux where the glibc release artifacts refuse to start.
+#
+# Why docker run instead of `container:`: GitHub only supports JavaScript
+# actions inside Alpine containers on x64 runners ("JavaScript Actions in
+# Alpine containers are only supported on x64 Linux runners"), so on the arm
+# runner the container job dies at "Set up job". Instead the JS actions run
+# on the ubuntu-22.04-arm host and only the build itself runs inside an
+# alpine:3.22 docker container.
+#
+# Native-only link deps on Linux (verified against Cargo.lock): libxkbcommon
+# (via xa11y-linux -> xkbcommon FFI). Everything else — ring, zbus, x11rb,
+# evdev, wl-clipboard-rs, resvg, image — is pure Rust, so no cmake/go/perl
+# toolchain is needed here.
+#
+# Artifacts: alphacode-linux-musl-aarch64.tar.gz (+ .sha256). Tag pushes also
+# attach the files to the release next to the glibc ones; the names never
+# collide with release.yml's alphacode-linux-arm64.tar.gz.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-alpine:
+    name: musl aarch64 (alpine 3.22)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Resolve the version BEFORE building and expose it as a step output.
+      #
+      # The version is baked into the binary at compile time (build.rs reads
+      # ALPHACODE_BUILD_SEMVER), so resolving it after the build only relabels
+      # the archive while `--version` keeps reporting whatever Cargo.toml said.
+      # release.yml does the same thing and asserts the binary matches the tag
+      # in its verify step; the assert is mirrored below so the musl artifact
+      # cannot ship with a version that disagrees with the glibc ones.
+      - name: Resolve build version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::could not resolve a semver build version (got '$VERSION')"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building alphacode v$VERSION for aarch64-unknown-linux-musl"
+
+      # The build runs inside an alpine:3.22 container (see
+      # scripts/build-alpine.sh): musl libc + libxkbcommon from Alpine 3.22 —
+      # the exact combination an AlpineTerm host has, so the produced binary
+      # links and runs there. Only the toolchain the release.yml build needs
+      # on top: build-base, pkgconf, libxkbcommon-dev.
+      - name: Build in Alpine 3.22 container
+        run: |
+          docker run --rm \
+            -e ALPHACODE_BUILD_SEMVER="$VERSION" \
+            -e ALPHACODE_RELEASE_BUILD=1 \
+            -e ALPHACODE_BUILD_GIT_DIRTY=0 \
+            -v "$GITHUB_WORKSPACE":/src \
+            -w /src \
+            alpine:3.22 \
+            sh scripts/build-alpine.sh
+        env:
+          # The `sh scripts/build-alpine.sh` inside the container is a separate
+          # process: workflow-level env does NOT cross the `docker run`
+          # boundary, so each variable the build script needs must be passed
+          # explicitly with -e above.
+          ALPHACODE_BUILD_SEMVER: ${{ steps.version.outputs.version }}
+
+      # Hard gate: the packaged binary must actually start on the musl host whose
+      # libc it was linked against, and must report the version this run
+      # resolved. A binary that links but cannot start (missing .so, wrong CPU
+      # arch) or that reports a different version than the rest of the release
+      # is a broken artifact — fail here rather than publish it.
+      #
+      # The binary cannot run on the ubuntu-22.04-arm runner itself (that host
+      # is glibc), so it runs inside the same alpine image its runtime deps
+      # came from. --version is passed through so it also proves the value we
+      # injected via -e reached the compiled binary, not just the runner env.
+      - name: Smoke test binary + verify version
+        run: |
+          set +e
+          OUTPUT="$(docker run --rm \
+            -v "$GITHUB_WORKSPACE":/src \
+            -w /src \
+            alpine:3.22 \
+            sh -c "apk add --no-cache libxkbcommon >/dev/null \
+              && ./target/release/alphacode --version" 2>&1)"
+          STATUS=$?
+          set -e
+          echo "Binary version output: $OUTPUT"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::error::the musl binary did not start on alpine 3.22 (exit $STATUS) — the artifact is unusable"
+            exit 1
+          fi
+          BIN_VERSION="$(echo "$OUTPUT" | sed -n 's/.*v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)"
+          if [ -z "$BIN_VERSION" ]; then
+            echo "::warning::could not parse version from binary output: $OUTPUT"
+          elif [ "$BIN_VERSION" != "$VERSION" ]; then
+            echo "::error::version mismatch: binary reports v$BIN_VERSION but this run resolved $VERSION"
+            exit 1
+          else
+            echo "OK: binary version v$BIN_VERSION matches this run"
+          fi
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      # Informational: the NEEDED entries should only ever be libxkbcommon
+      # plus libc.musl-aarch64 — a glibc library showing up here means the
+      # musl build silently broke.
+      - name: Show dynamic dependencies
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/src alpine:3.22 \
+            readelf -d /src/target/release/alphacode | grep NEEDED || true
+
+      - name: Archive + checksum
+        shell: bash
+        run: |
+          tar -czf alphacode-linux-musl-aarch64.tar.gz -C target/release alphacode
+          sha256sum alphacode-linux-musl-aarch64.tar.gz > alphacode-linux-musl-aarch64.sha256
+          ls -la alphacode-linux-musl-aarch64.*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alphacode-linux-musl-aarch64
+          path: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          if-no-files-found: error
+
+      - name: Attach to release (tag builds only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            alphacode-linux-musl-aarch64.tar.gz
+            alphacode-linux-musl-aarch64.sha256
+          fail_on_unmatched_files: false

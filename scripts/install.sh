@@ -7,6 +7,10 @@
 #   curl -fsSL ... | bash -s -- --prefix ~/.local
 #
 # Supported: Linux + macOS on x86_64 and aarch64.
+#
+# On musl-based Linux (Alpine, postmarketOS, AlpineTerm) aarch64 hosts, the
+# glibc release artifact cannot start, so a static musl build is fetched
+# instead; the glibc asset is tried first as a fallback for older releases.
 
 set -euo pipefail
 
@@ -201,15 +205,52 @@ fi
 # Some releases strip the leading 'v' in their published archives.
 VERSION_NO_V="${VERSION#v}"
 
-ASSET="alphacode-${PLATFORM}-${ARCH}.tar.gz"
-URL="https://github.com/$REPO/releases/download/${VERSION}/$ASSET"
+# --- Pick the release asset ----------------------------------------------------
+
+# A glibc binary cannot start on a musl host (Alpine, postmarketOS, AlpineTerm):
+# it dies with "Error loading shared library ld-linux-aarch64.so.1". Those hosts
+# get a dedicated static musl artifact instead, named so it can never collide
+# with the glibc one (see .github/workflows/build-alpine.yml).
+#
+# Detection is deliberately narrow: `ldd --version` on musl mentions musl and
+# writes to stderr; on glibc it reports "ldd (GNU libc)". Hosts without ldd (some
+# minimal images) fall through to the default glibc asset, and the source-build
+# fallback below still catches them if that binary will not run.
+IS_MUSL=0
+if [ "$PLATFORM" = "linux" ] && command -v ldd >/dev/null 2>&1; then
+  if ldd --version 2>&1 | grep -qi musl; then
+    IS_MUSL=1
+  fi
+fi
+
+# Candidate assets in preference order. On musl the musl build is tried first,
+# then the glibc one, so releases published before this workflow existed (no musl
+# artifact) still install instead of forcing a long source build.
+if [ "$IS_MUSL" = "1" ] && [ "$ARCH" = "arm64" ]; then
+  CANDIDATES="alphacode-linux-musl-aarch64.tar.gz
+alphacode-linux-arm64.tar.gz"
+  print "musl libc detected — preferring the static musl build."
+else
+  CANDIDATES="alphacode-${PLATFORM}-${ARCH}.tar.gz"
+fi
 
 # --- Download ----------------------------------------------------------------
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-print "Downloading $URL"
-if ! curl -fL --retry 3 --connect-timeout 15 -o "$TMP/$ASSET" "$URL"; then
+
+ASSET=""
+for candidate in $CANDIDATES; do
+  URL="https://github.com/$REPO/releases/download/${VERSION}/$candidate"
+  print "Trying $URL"
+  if curl -fL --retry 3 --connect-timeout 15 -o "$TMP/$candidate" "$URL"; then
+    ASSET="$candidate"
+    break
+  fi
+  rm -f "$TMP/$candidate"
+done
+
+if [ -z "$ASSET" ]; then
   if [ -n "$SOURCE_ONLY" ]; then
     fail "download failed (asset may not exist for $PLATFORM/$ARCH — try --version)"
   fi
@@ -217,6 +258,8 @@ if ! curl -fL --retry 3 --connect-timeout 15 -o "$TMP/$ASSET" "$URL"; then
   build_from_source
   exit 0
 fi
+URL="https://github.com/$REPO/releases/download/${VERSION}/$ASSET"
+print "Downloaded $ASSET"
 
 # Optional checksum verification.
 if curl -fsSL -o "$TMP/SHA256SUMS" \
